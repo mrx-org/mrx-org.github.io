@@ -91,9 +91,8 @@ def resample_to_reference(source_img, reference_img, order=3):
     source_affine = source_img.affine
     
     # Get reference grid properties
-    reference_data = reference_img.get_fdata()
     reference_affine = reference_img.affine
-    reference_shape = reference_data.shape[:3]  # Only spatial dimensions
+    reference_shape = reference_img.shape[:3]  # Only spatial dimensions
     
     # Create coordinate grid for reference space
     # Generate voxel coordinates in reference space
@@ -122,9 +121,13 @@ def resample_to_reference(source_img, reference_img, order=3):
     # Reshape back to reference grid shape
     source_coords = source_coords.reshape(reference_shape + (3,))
     
-    # Handle multi-dimensional data (e.g., RGB, time series)
-    if len(source_data.shape) == 3:
-        # Single volume
+    # Handle multi-dimensional data (preserve exact dimensionality)
+    extra_dims = source_data.shape[3:]
+    output_shape = reference_shape + extra_dims
+    resampled_data = np.zeros(output_shape, dtype=source_data.dtype)
+    
+    if not extra_dims:
+        # Single volume (3D)
         resampled_data = map_coordinates(
             source_data,
             [source_coords[..., 0], source_coords[..., 1], source_coords[..., 2]],
@@ -134,14 +137,13 @@ def resample_to_reference(source_img, reference_img, order=3):
             prefilter=False
         )
     else:
-        # Multi-dimensional (e.g., 4D)
-        output_shape = reference_shape + source_data.shape[3:]
-        resampled_data = np.zeros(output_shape, dtype=source_data.dtype)
-        
-        # Resample each volume/timepoint separately
-        for i in range(source_data.shape[3]):
-            resampled_data[..., i] = map_coordinates(
-                source_data[..., i],
+        # Multi-dimensional (4D, 5D, etc.)
+        # Resample each volume/timepoint separately by iterating over all extra dimensions
+        for idx in np.ndindex(extra_dims):
+            # Combined index: [:, :, :, idx0, idx1, ...]
+            full_idx = (slice(None), slice(None), slice(None)) + idx
+            resampled_data[full_idx] = map_coordinates(
+                source_data[full_idx],
                 [source_coords[..., 0], source_coords[..., 1], source_coords[..., 2]],
                 order=order,
                 mode='constant',
@@ -149,18 +151,22 @@ def resample_to_reference(source_img, reference_img, order=3):
                 prefilter=False
             )
     
-    # Create new NIfTI image with reference header
+    # Create new NIfTI image with source header to preserve metadata
+    new_header = source_img.header.copy()
     resampled_img = nib.Nifti1Image(
         resampled_data,
         reference_affine,
-        header=reference_img.header.copy()
+        header=new_header
     )
     
-    # Copy important metadata from source
-    resampled_img.header['cal_min'] = source_img.header['cal_min']
-    resampled_img.header['cal_max'] = source_img.header['cal_max']
-    resampled_img.header['scl_slope'] = source_img.header['scl_slope']
-    resampled_img.header['scl_inter'] = source_img.header['scl_inter']
+    # Ensure header zooms are correct: spatial from reference, others from source
+    ref_zooms = reference_img.header.get_zooms()[:3]
+    src_zooms = source_img.header.get_zooms()
+    new_zooms = list(ref_zooms)
+    if len(src_zooms) > 3:
+        new_zooms.extend(src_zooms[3:])
+    
+    resampled_img.header.set_zooms(new_zooms)
     
     return resampled_img
 
@@ -205,14 +211,14 @@ def main():
     # Display information
     print()
     print("FOV mask properties:")
-    print(f"  Shape: {fov_img.shape[:3]}")
-    print(f"  Spacing: {fov_img.header.get_zooms()[:3]}")
+    print(f"  Shape: {fov_img.shape}")
+    print(f"  Spacing: {fov_img.header.get_zooms()}")
     print(f"  Affine shape: {fov_img.affine.shape}")
     
     print()
     print("Target properties:")
-    print(f"  Shape: {target_img.shape[:3]}")
-    print(f"  Spacing: {target_img.header.get_zooms()[:3]}")
+    print(f"  Shape: {target_img.shape}")
+    print(f"  Spacing: {target_img.header.get_zooms()}")
     print(f"  Affine shape: {target_img.affine.shape}")
     print()
     
@@ -248,8 +254,8 @@ def main():
         print("✓ Resampling complete!")
         print()
         print("Resampled file properties:")
-        print(f"  Shape: {resampled_img.shape[:3]}")
-        print(f"  Spacing: {resampled_img.header.get_zooms()[:3]}")
+        print(f"  Shape: {resampled_img.shape}")
+        print(f"  Spacing: {resampled_img.header.get_zooms()}")
         print(f"  Output file: {output_path}")
     except Exception as e:
         print(f"Error saving file: {e}")

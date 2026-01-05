@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Niivue Minimal App</title>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
     <style>
       :root {
         --bg: #0b1020;
@@ -393,11 +394,17 @@
           </div>
         </div>
           </div>
-          <div class="row" style="margin-top: 12px;">
-            <button id="downloadFovMesh" class="btn primary" type="button" style="width: 100%;">
-              Download FOV (.stl) + NIfTI
+          <div class="row" style="margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <button id="downloadFovMesh" class="btn primary" type="button">
+              Download FOV + NIfTI
+            </button>
+            <button id="resampleToFov" class="btn" type="button" disabled title="Wait for Pyodide to load...">
+              Resample to FOV
             </button>
         </div>
+          <div id="pyodideStatus" style="font-size: 10px; color: var(--muted); margin-top: 4px; text-align: center;">
+            Python (Pyodide): loading...
+          </div>
       </div>
       </div>
     </div>
@@ -456,6 +463,128 @@
       const btnAddFile = document.getElementById("btn-add-file");
       let isAddingVolume = false;
 
+      const resampleToFov = document.getElementById("resampleToFov");
+      const pyodideStatus = document.getElementById("pyodideStatus");
+      let pyodide = null;
+
+      async function initPyodide() {
+        try {
+          pyodideStatus.textContent = "Python (Pyodide): loading core...";
+          pyodide = await loadPyodide();
+          pyodideStatus.textContent = "Python (Pyodide): loading numpy/scipy...";
+          await pyodide.loadPackage(["numpy", "scipy", "micropip"]);
+          pyodideStatus.textContent = "Python (Pyodide): installing nibabel...";
+          await pyodide.runPythonAsync(`
+            import micropip
+            await micropip.install('nibabel')
+          `);
+          
+          // Inject the resampling function
+          await pyodide.runPythonAsync(`
+import numpy as np
+import nibabel as nib
+from scipy.ndimage import map_coordinates
+import io
+
+def resample_to_reference(source_img, reference_img, order=3):
+    # Use float32 to save 50% memory compared to default float64
+    source_data = source_img.get_fdata(dtype=np.float32)
+    source_affine = source_img.affine.astype(np.float32)
+    reference_affine = reference_img.affine.astype(np.float32)
+    reference_shape = reference_img.shape[:3]
+    
+    extra_dims = source_data.shape[3:]
+    output_shape = reference_shape + extra_dims
+    resampled_data = np.zeros(output_shape, dtype=np.float32)
+    
+    # Pre-calculate world-to-source coordinate transform matrix
+    source_affine_inv = np.linalg.inv(source_affine)
+    # Combine reference_vox -> world and world -> source_vox into one matrix
+    vox_to_vox = source_affine_inv @ reference_affine
+    
+    # Process slice-by-slice along the Z dimension of the reference grid
+    # This drastically reduces the size of intermediate coordinate arrays
+    for z in range(reference_shape[2]):
+        # Generate voxel coordinates for this slice
+        x_grid, y_grid = np.meshgrid(
+            np.arange(reference_shape[0], dtype=np.float32),
+            np.arange(reference_shape[1], dtype=np.float32),
+            indexing='ij'
+        )
+        z_grid = np.full_like(x_grid, z, dtype=np.float32)
+        
+        # Flatten and add homogeneous coordinate (1.0)
+        coords_slice = np.stack([x_grid, y_grid, z_grid, np.ones_like(x_grid)], axis=-1)
+        coords_slice_flat = coords_slice.reshape(-1, 4)
+        
+        # Transform directly to source voxel coordinates
+        source_coords_slice = np.dot(coords_slice_flat, vox_to_vox.T)[:, :3]
+        
+        # Reshape for map_coordinates
+        sc_x = source_coords_slice[:, 0].reshape(reference_shape[0], reference_shape[1])
+        sc_y = source_coords_slice[:, 1].reshape(reference_shape[0], reference_shape[1])
+        sc_z = source_coords_slice[:, 2].reshape(reference_shape[0], reference_shape[1])
+        
+        if not extra_dims:
+            # 3D volume
+            resampled_data[:, :, z] = map_coordinates(
+                source_data,
+                [sc_x, sc_y, sc_z],
+                order=order, mode='constant', cval=0.0, prefilter=False
+            )
+        else:
+            # 4D+ volume: resample each volume for this slice
+            for idx in np.ndindex(extra_dims):
+                full_idx_src = (slice(None), slice(None), slice(None)) + idx
+                full_idx_dst = (slice(None), slice(None), z) + idx
+                resampled_data[full_idx_dst] = map_coordinates(
+                    source_data[full_idx_src],
+                    [sc_x, sc_y, sc_z],
+                    order=order, mode='constant', cval=0.0, prefilter=False
+                )
+    
+    new_header = source_img.header.copy()
+    resampled_img = nib.Nifti1Image(resampled_data, reference_affine, header=new_header)
+    
+    ref_zooms = reference_img.header.get_zooms()[:3]
+    src_zooms = source_img.header.get_zooms()
+    new_zooms = list(ref_zooms)
+    if len(src_zooms) > 3:
+        new_zooms.extend(src_zooms[3:])
+    resampled_img.header.set_zooms(new_zooms)
+    return resampled_img
+
+def run_resampling(source_bytes, reference_bytes):
+    # Convert PyProxy to bytes
+    source_bytes = source_bytes.to_py()
+    reference_bytes = reference_bytes.to_py()
+    
+    # Load from bytes
+    source_fh = nib.FileHolder(fileobj=io.BytesIO(source_bytes))
+    source_img = nib.Nifti1Image.from_file_map({'header': source_fh, 'image': source_fh})
+    
+    ref_fh = nib.FileHolder(fileobj=io.BytesIO(reference_bytes))
+    ref_img = nib.Nifti1Image.from_file_map({'header': ref_fh, 'image': ref_fh})
+    
+    # Resample
+    resampled_img = resample_to_reference(source_img, ref_img, order=1)
+    
+    # Save to bytes (NIfTI-1 single file)
+    out_fh = io.BytesIO()
+    resampled_img.to_file_map({'header': nib.FileHolder(fileobj=out_fh), 'image': nib.FileHolder(fileobj=out_fh)})
+    return out_fh.getvalue()
+          `);
+          
+          pyodideStatus.textContent = "Python (Pyodide): ready";
+          resampleToFov.disabled = false;
+          resampleToFov.title = "Resample current volume to match FOV grid";
+        } catch (e) {
+          console.error(e);
+          pyodideStatus.textContent = "Python (Pyodide): error " + e.message;
+        }
+      }
+      initPyodide();
+
       btnNewFile.addEventListener("click", () => {
         isAddingVolume = false;
         fileInput.click();
@@ -505,7 +634,7 @@
        * @returns {Uint8Array} Modified NIfTI bytes with qform set
        */
       function setNiftiQform(niftiBytes, affineRowMajor, qformCode = 2, sformCode = 2) {
-          const view = new DataView(niftiBytes.buffer);
+          const view = new DataView(niftiBytes.buffer, niftiBytes.byteOffset, niftiBytes.byteLength);
           const littleEndian = true; // NIfTI is typically little-endian
           
           // --- Set SFORM (offset 280, 12 floats) ---
@@ -1241,7 +1370,7 @@
 
       function getFovGeometry() {
         const { vol, dim3, affine } = getVolumeInfo();
-        if (!dim3 || dim3.some((d) => !Number.isFinite(d) || d <= 1)) {
+        if (!dim3 || dim3.some((d) => !Number.isFinite(d) || d < 1)) {
           throw new Error("No volume dims found (load a volume first).");
         }
         if (!vol) {
@@ -1628,6 +1757,186 @@
       syncFovLabels();
       fovControls.style.display = showFov.checked ? "grid" : "none";
 
+      /**
+       * Generates a NIfTI mask for the current FOV settings.
+       * @returns {Uint8Array} NIfTI file bytes
+       */
+      function generateFovMaskNifti() {
+        if (!fovMeshData) throw new Error("No FOV mesh data available");
+        
+        const fovCenterWorld = fovMeshData.centerWorld;
+        const fovSizeMm = fovMeshData.sizeMm;
+        const fovRotDeg = fovMeshData.rotationDeg;
+        
+        const mDims = [
+          Number(maskX.value),
+          Number(maskY.value),
+          Number(maskZ.value)
+        ];
+      
+        const vSpacing = [
+          fovSizeMm[0] / mDims[0],
+          fovSizeMm[1] / mDims[1],
+          fovSizeMm[2] / mDims[2]
+        ];
+        
+        const toRad = (d) => (d * Math.PI) / 180;
+        const rX = toRad(fovRotDeg[0]);
+        const rY = toRad(fovRotDeg[1]);
+        const rZ = toRad(fovRotDeg[2]);
+        const cX = Math.cos(rX), sX = Math.sin(rX);
+        const cY = Math.cos(rY), sY = Math.sin(rY);
+        const cZ = Math.cos(rZ), sZ = Math.sin(rZ);
+        
+        const R = [
+          [cZ * cY, cZ * sY * sX - sZ * cX, cZ * sY * cX + sZ * sX],
+          [sZ * cY, sZ * sY * sX + cZ * cX, sZ * sY * cX - cZ * sX],
+          [-sY,     cY * sX,               cY * cX]
+        ];
+        
+        const h = [fovSizeMm[0]/2, fovSizeMm[1]/2, fovSizeMm[2]/2];
+        const local_0 = [
+          -h[0] + vSpacing[0] / 2,
+          -h[1] + vSpacing[1] / 2,
+          -h[2] + vSpacing[2] / 2
+        ];
+        
+        const rasOrigin = [
+          R[0][0] * local_0[0] + R[0][1] * local_0[1] + R[0][2] * local_0[2] + fovCenterWorld[0],
+          R[1][0] * local_0[0] + R[1][1] * local_0[1] + R[1][2] * local_0[2] + fovCenterWorld[1],
+          R[2][0] * local_0[0] + R[2][1] * local_0[1] + R[2][2] * local_0[2] + fovCenterWorld[2]
+        ];
+        
+        const maskData = new Uint8Array(mDims[0] * mDims[1] * mDims[2]).fill(1);
+      
+        const affineRow = [
+          R[0][0] * vSpacing[0], R[0][1] * vSpacing[1], R[0][2] * vSpacing[2], rasOrigin[0],
+          R[1][0] * vSpacing[0], R[1][1] * vSpacing[1], R[1][2] * vSpacing[2], rasOrigin[1],
+          R[2][0] * vSpacing[0], R[2][1] * vSpacing[1], R[2][2] * vSpacing[2], rasOrigin[2],
+          0, 0, 0, 1
+        ];
+        
+        let niftiBytes = NVImage.createNiftiArray(
+          mDims,
+          vSpacing, 
+          affineRow,
+          2, // UINT8
+          maskData
+        );
+        
+        return setNiftiQform(niftiBytes, affineRow, 2);
+      }
+
+      /**
+       * Gets a volume as NIfTI bytes.
+       * @param {object} vol - Niivue volume object
+       * @returns {Uint8Array} NIfTI file bytes
+       */
+      function getVolumeNifti(vol) {
+        if (!vol) throw new Error("No volume provided");
+        const hdr = vol.hdr ?? vol.header;
+        // NIfTI header dims: dims[0] is rank, dims[1..dims[0]] are sizes
+        const dims = hdr?.dims ?? hdr?.dim ?? vol.dims ?? [0, 0, 0, 0];
+        const rank = dims[0] || 3;
+        const niftiDims = [];
+        for (let i = 1; i <= rank; i++) niftiDims.push(dims[i]);
+        
+        const pixDims = hdr?.pixDims ?? hdr?.pixDim ?? vol.pixDims ?? [1, 1, 1, 1];
+        const datatypeCode = hdr?.datatypeCode ?? hdr?.datatype ?? 16;
+        
+        let currentAffineRow = null;
+        let currentAffineCol = vol.matRAS;
+        
+        if (currentAffineCol && currentAffineCol.length === 16 && hdr?.affine) {
+            let hdrAffine = hdr.affine;
+            let hdrAffineRow = null;
+            if (Array.isArray(hdrAffine)) {
+                if (hdrAffine.length === 16) hdrAffineRow = hdrAffine;
+                else if (hdrAffine.length === 4 && Array.isArray(hdrAffine[0])) {
+                    hdrAffineRow = [
+                        hdrAffine[0][0], hdrAffine[0][1], hdrAffine[0][2], hdrAffine[0][3],
+                        hdrAffine[1][0], hdrAffine[1][1], hdrAffine[1][2], hdrAffine[1][3],
+                        hdrAffine[2][0], hdrAffine[2][1], hdrAffine[2][2], hdrAffine[2][3],
+                        hdrAffine[3][0], hdrAffine[3][1], hdrAffine[3][2], hdrAffine[3][3]
+                    ];
+                }
+            }
+            
+            if (hdrAffineRow) {
+                const hdrTranslation = [hdrAffineRow[3], hdrAffineRow[7], hdrAffineRow[11]];
+                const matRASRow = affineColToRowMajor(currentAffineCol);
+                const finalAffineRow = [...matRASRow];
+                finalAffineRow[3] = hdrTranslation[0];
+                finalAffineRow[7] = hdrTranslation[1];
+                finalAffineRow[11] = hdrTranslation[2];
+                currentAffineRow = finalAffineRow;
+            } else {
+                currentAffineRow = affineColToRowMajor(currentAffineCol);
+            }
+        } else if (hdr?.affine) {
+            const hdrAffine = hdr.affine;
+            if (Array.isArray(hdrAffine)) {
+                if (hdrAffine.length === 16) currentAffineRow = hdrAffine;
+                else if (hdrAffine.length === 4 && Array.isArray(hdrAffine[0])) {
+                    currentAffineRow = [
+                        hdrAffine[0][0], hdrAffine[0][1], hdrAffine[0][2], hdrAffine[0][3],
+                        hdrAffine[1][0], hdrAffine[1][1], hdrAffine[1][2], hdrAffine[1][3],
+                        hdrAffine[2][0], hdrAffine[2][1], hdrAffine[2][2], hdrAffine[2][3],
+                        hdrAffine[3][0], hdrAffine[3][1], hdrAffine[3][2], hdrAffine[3][3]
+                    ];
+                }
+            }
+        }
+        
+        if (!currentAffineRow) {
+            if (currentAffineCol && currentAffineCol.length === 16) currentAffineRow = affineColToRowMajor(currentAffineCol);
+            else throw new Error("Cannot determine affine");
+        }
+        
+        const sx = Math.hypot(currentAffineRow[0], currentAffineRow[4], currentAffineRow[8]);
+        const sy = Math.hypot(currentAffineRow[1], currentAffineRow[5], currentAffineRow[9]);
+        const sz = Math.hypot(currentAffineRow[2], currentAffineRow[6], currentAffineRow[10]);
+        const finalPixDims = [sx, sy, sz];
+        // Add temporal/extra spacing if rank > 3
+        for (let i = 4; i <= rank; i++) {
+          finalPixDims.push(pixDims[i] || 1.0);
+        }
+
+        let niftiBytes = NVImage.createNiftiArray(
+            niftiDims,
+            finalPixDims,
+            currentAffineRow,
+            datatypeCode,
+            vol.img
+        );
+        
+        return setNiftiQform(niftiBytes, currentAffineRow, 2);
+      }
+
+      /**
+       * Triggers a download of a volume as a NIfTI file.
+       * @param {object} vol - Niivue volume object
+       */
+      function downloadVolume(vol) {
+        try {
+          const volBytes = getVolumeNifti(vol);
+          const blob = new Blob([volBytes], { type: "application/octet-stream" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          const fname = vol.name && vol.name.length > 0 ? vol.name : "volume.nii";
+          a.download = fname.endsWith(".gz") ? fname : fname + (fname.endsWith(".nii") ? "" : ".nii");
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 10000);
+          setStatus(`Downloaded: ${a.download}`);
+        } catch (e) {
+          console.error("Failed to download NIfTI:", e);
+          setStatus(`Download error: ${e.message}`);
+        }
+      }
+
       downloadFovMesh?.addEventListener("click", () => {
         try {
           if (!fovMeshData) {
@@ -1635,155 +1944,24 @@
             return;
           }
 
-          const vol = nv.volumes?.[0];
-          const hdr = vol?.hdr ?? vol?.header;
-          const { dim3 } = getVolumeInfo();
-          
-          // ===== DEBUG: Print all coordinate information =====
-          console.log("========== FOV EXPORT DEBUG (RAS) ==========");
-          
-          // 1. Volume info
-          console.log("Volume dims:", dim3);
-          console.log("Volume matRAS (col-major):", [...vol.matRAS]);
-          console.log("Header affine:", hdr?.affine);
-          
-          // 2. Niivue's vox2mm function
-          const vox2mm = voxToMmFactory(vol, vol.matRAS);
-          const corner000 = vox2mm(0, 0, 0);
-          const cornerMax = vox2mm(dim3[0]-1, dim3[1]-1, dim3[2]-1);
-          const volCenter = vox2mm((dim3[0]-1)/2, (dim3[1]-1)/2, (dim3[2]-1)/2);
-          console.log("Voxel (0,0,0) -> World RAS:", corner000);
-          console.log("Voxel (max) -> World RAS:", cornerMax);
-          console.log("Volume Center (World RAS):", volCenter);
-          
-          // 3. FOV definition from fovDefinition (set in getFovGeometry)
-          console.log("fovDefinition:", fovDefinition);
-          console.log("fovDefinition.centerWorld (true center):", fovDefinition?.centerWorld);
-          console.log("fovDefinition.baseFOVoffsetMm:", fovDefinition?.baseFOVoffsetMm);
-          
-          // 3b. fovMeshData stored values
-          console.log("fovMeshData.centerWorld:", fovMeshData?.centerWorld);
-          console.log("fovMeshData.baseOffsetVox:", fovMeshData?.baseOffsetVox);
-          console.log("fovMeshData.sizeMm:", fovMeshData?.sizeMm);
-          console.log("fovMeshData.rotationDeg:", fovMeshData?.rotationDeg);
-          
-          // 4. FOV mesh world coords (what Niivue displays)
-          if (fovMeshData.vertsWorld) {
-            // Find bounding box of the mesh
-            let minX = Infinity, minY = Infinity, minZ = Infinity;
-            let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-            for (let i = 0; i < fovMeshData.vertsWorld.length; i += 3) {
-              minX = Math.min(minX, fovMeshData.vertsWorld[i]);
-              maxX = Math.max(maxX, fovMeshData.vertsWorld[i]);
-              minY = Math.min(minY, fovMeshData.vertsWorld[i+1]);
-              maxY = Math.max(maxY, fovMeshData.vertsWorld[i+1]);
-              minZ = Math.min(minZ, fovMeshData.vertsWorld[i+2]);
-              maxZ = Math.max(maxZ, fovMeshData.vertsWorld[i+2]);
-            }
-            console.log("FOV Mesh World BBox Min (RAS):", [minX, minY, minZ]);
-            console.log("FOV Mesh World BBox Max (RAS):", [maxX, maxY, maxZ]);
-            console.log("FOV Mesh World Center (RAS):", [(minX+maxX)/2, (minY+maxY)/2, (minZ+maxZ)/2]);
-          }
-          
-          // 5. What we're exporting
-          console.log("==========================================");
-          
-          // ===== EXPORT: STL in RAS coordinates (Niivue/NIfTI standard) =====
-          let vertsForExport = fovMeshData.vertsWorld;
-          const stlRas = toAsciiStl({ vertsWorld: vertsForExport, tris: fovMeshData.tris }, { name: "fov-ras" });
+          // ===== EXPORT: STL in RAS coordinates =====
+          const stlRas = toAsciiStl({ vertsWorld: fovMeshData.vertsWorld, tris: fovMeshData.tris }, { name: "fov-ras" });
           downloadTextFile("fov-box-ras.stl", stlRas, "application/sla");
           
-          // ===== EXPORT: STL in LPS coordinates (for viewers that expect LPS) =====
-          // LPS conversion: x -> -x, y -> -y, z -> z (flip X and Y axes)
-          const vertsLps = new Float32Array(vertsForExport.length);
-          for (let i = 0; i < vertsForExport.length; i += 3) {
-            vertsLps[i] = -vertsForExport[i];     // x -> -x
-            vertsLps[i + 1] = -vertsForExport[i + 1]; // y -> -y
-            vertsLps[i + 2] = vertsForExport[i + 2];  // z -> z (unchanged)
+          // ===== EXPORT: STL in LPS coordinates =====
+          const vertsLps = new Float32Array(fovMeshData.vertsWorld.length);
+          for (let i = 0; i < fovMeshData.vertsWorld.length; i += 3) {
+            vertsLps[i] = -fovMeshData.vertsWorld[i];
+            vertsLps[i + 1] = -fovMeshData.vertsWorld[i + 1];
+            vertsLps[i + 2] = fovMeshData.vertsWorld[i + 2];
           }
           const stlLps = toAsciiStl({ vertsWorld: vertsLps, tris: fovMeshData.tris }, { name: "fov-lps" });
           downloadTextFile("fov-box-lps.stl", stlLps, "application/sla");
 
-          // Download FOV mask as rotated NIfTI
-          let maskDims, voxelSpacing, finalMaskAffine;
+          // Download FOV mask
           try {
-            // Get theoretical FOV properties from the definition
-            const fovCenterWorld = fovMeshData.centerWorld;  // TRUE FOV center (RAS world)
-            const fovSizeMm = fovMeshData.sizeMm;            // Local box size before rotation
-            const fovRotDeg = fovMeshData.rotationDeg;       // Z-Y-X Euler angles
-            
-            console.log("FOV Mask: Center (World RAS):", fovCenterWorld);
-            console.log("FOV Mask: Size (Local mm):", fovSizeMm);
-            console.log("FOV Mask: Rotation (deg):", fovRotDeg);
-            
-            // Get user-specified matrix dimensions
-            maskDims = [
-              Number(maskX.value),
-              Number(maskY.value),
-              Number(maskZ.value)
-            ];
-          
-            // Calculate voxel spacing based on LOCAL FOV box size
-            voxelSpacing = [
-              fovSizeMm[0] / maskDims[0],
-              fovSizeMm[1] / maskDims[1],
-              fovSizeMm[2] / maskDims[2]
-            ];
-            
-            // Generate rotation matrix R = Rz * Ry * Rx
-            const toRad = (d) => (d * Math.PI) / 180;
-            const rX = toRad(fovRotDeg[0]);
-            const rY = toRad(fovRotDeg[1]);
-            const rZ = toRad(fovRotDeg[2]);
-            const cX = Math.cos(rX), sX = Math.sin(rX);
-            const cY = Math.cos(rY), sY = Math.sin(rY);
-            const cZ = Math.cos(rZ), sZ = Math.sin(rZ);
-            
-            const R = [
-              [cZ * cY, cZ * sY * sX - sZ * cX, cZ * sY * cX + sZ * sX],
-              [sZ * cY, sZ * sY * sX + cZ * cX, sZ * sY * cX - cZ * sX],
-              [-sY,     cY * sX,               cY * cX]
-            ];
-            
-            // Calculate world coordinate of voxel (0,0,0) center
-            // P_world_0 = R * P_local_0 + C_world
-            const h = [fovSizeMm[0]/2, fovSizeMm[1]/2, fovSizeMm[2]/2];
-            const local_0 = [
-              -h[0] + voxelSpacing[0] / 2,
-              -h[1] + voxelSpacing[1] / 2,
-              -h[2] + voxelSpacing[2] / 2
-            ];
-            
-            const rasOrigin = [
-              R[0][0] * local_0[0] + R[0][1] * local_0[1] + R[0][2] * local_0[2] + fovCenterWorld[0],
-              R[1][0] * local_0[0] + R[1][1] * local_0[1] + R[1][2] * local_0[2] + fovCenterWorld[1],
-              R[2][0] * local_0[0] + R[2][1] * local_0[1] + R[2][2] * local_0[2] + fovCenterWorld[2]
-            ];
-            
-            // Create mask data (all 1s, since the volume is the FOV)
-            const maskData = new Uint8Array(maskDims[0] * maskDims[1] * maskDims[2]).fill(1);
-          
-            // Build the rotated NIfTI affine
-            finalMaskAffine = [
-              R[0][0] * voxelSpacing[0], R[0][1] * voxelSpacing[1], R[0][2] * voxelSpacing[2], rasOrigin[0],
-              R[1][0] * voxelSpacing[0], R[1][1] * voxelSpacing[1], R[1][2] * voxelSpacing[2], rasOrigin[1],
-              R[2][0] * voxelSpacing[0], R[2][1] * voxelSpacing[1], R[2][2] * voxelSpacing[2], rasOrigin[2],
-              0, 0, 0, 1
-            ];
-            
-            console.log("FOV Mask: Final Rotated Affine:", finalMaskAffine);
-            
-            let maskNifti = NVImage.createNiftiArray(
-              maskDims,
-              voxelSpacing, 
-              finalMaskAffine,
-              2, // UINT8
-              maskData
-            );
-            
-            maskNifti = setNiftiQform(maskNifti, finalMaskAffine, 2);
-            
-            const maskBlob = new Blob([maskNifti], { type: "application/octet-stream" });
+            const maskBytes = generateFovMaskNifti();
+            const maskBlob = new Blob([maskBytes], { type: "application/octet-stream" });
             const maskUrl = URL.createObjectURL(maskBlob);
             const maskLink = document.createElement("a");
             maskLink.href = maskUrl;
@@ -1792,235 +1970,85 @@
             maskLink.click();
             maskLink.remove();
             setTimeout(() => URL.revokeObjectURL(maskUrl), 10000);
-            
           } catch (e) {
             console.error("Failed to create FOV mask:", e);
             setStatus(`STL ok, mask error: ${e.message}`);
           }
 
-          // Also download the current NIfTI volume using NVImage.createNiftiArray
+          // Download the current NIfTI volume
           if (nv.volumes?.length) {
             setTimeout(() => {
-              try {
-              const vol = nv.volumes[0];
-                const hdr = vol.hdr ?? vol.header;
-                const dims = hdr?.dims ?? hdr?.dim ?? vol.dims ?? [0, 0, 0, 0];
-                const pixDims = hdr?.pixDims ?? hdr?.pixDim ?? vol.pixDims ?? [1, 1, 1, 1];
-                const datatypeCode = hdr?.datatypeCode ?? hdr?.datatype ?? 16;
-                
-                // ============================================================================
-                // CRITICAL: Handling Niivue's matRAS Translation Limitation
-                // ============================================================================
-                // 
-                // PROBLEM:
-                // Niivue's calculateRAS() function (ImageOrientation.ts) computes vol.matRAS by
-                // reorienting the volume to RAS space. During this process, the translation
-                // component (the world coordinate origin) is LOST. This is a known Niivue limitation.
-                //
-                // WHY THIS MATTERS:
-                // - vol.matRAS contains: rotation + scaling (3x3 matrix) but NO translation
-                // - hdr.affine contains: the ORIGINAL full affine from NIfTI sform/qform WITH translation
-                // - For correct NIfTI export, we need the FULL affine (rotation + scaling + translation)
-                //
-                // SOLUTION:
-                // Combine rotation/scaling from vol.matRAS (current state, including any user rotations)
-                // with translation from hdr.affine (original world coordinate origin)
-                //
-                // This ensures:
-                // 1. User rotations are preserved (from vol.matRAS)
-                // 2. Original world coordinates are preserved (from hdr.affine translation)
-                // 3. Both sform and qform have matching transformations for MITK compatibility
-                // ============================================================================
-                
-                let currentAffineRow = null;
-                let currentAffineCol = vol.matRAS;
-                
-                // Combine vol.matRAS (rotation/scaling) with hdr.affine (translation)
-                if (currentAffineCol && currentAffineCol.length === 16 && hdr?.affine) {
-                    // Parse hdr.affine (can be 4x4 nested array or flattened)
-                    let hdrAffine = hdr.affine;
-                    let hdrAffineRow = null;
-                    if (Array.isArray(hdrAffine)) {
-                        if (hdrAffine.length === 16) {
-                            hdrAffineRow = hdrAffine; // Already flattened row-major
-                        } else if (hdrAffine.length === 4 && Array.isArray(hdrAffine[0])) {
-                            // 4x4 nested array, flatten it
-                            hdrAffineRow = [
-                                hdrAffine[0][0], hdrAffine[0][1], hdrAffine[0][2], hdrAffine[0][3],
-                                hdrAffine[1][0], hdrAffine[1][1], hdrAffine[1][2], hdrAffine[1][3],
-                                hdrAffine[2][0], hdrAffine[2][1], hdrAffine[2][2], hdrAffine[2][3],
-                                hdrAffine[3][0], hdrAffine[3][1], hdrAffine[3][2], hdrAffine[3][3]
-              ];
-          }
-                    }
-                    
-                    if (hdrAffineRow) {
-                        // Extract translation from hdr.affine (row-major format: tx at [3], ty at [7], tz at [11])
-                        // This is the ORIGINAL world coordinate origin from the NIfTI file's sform/qform
-                        const hdrTranslation = [hdrAffineRow[3], hdrAffineRow[7], hdrAffineRow[11]];
-                        
-                        // Check if matRAS has translation (it usually doesn't due to Niivue's calculateRAS limitation)
-                        const matRASRow = affineColToRowMajor(currentAffineCol);
-                        const matRASTranslation = [matRASRow[3], matRASRow[7], matRASRow[11]];
-                        const matRASHasTranslation = Math.abs(matRASTranslation[0]) > 1e-6 || Math.abs(matRASTranslation[1]) > 1e-6 || Math.abs(matRASTranslation[2]) > 1e-6;
-                        
-                        // Log which translation source we're using
-                        if (!matRASHasTranslation) {
-                            console.log("Download: vol.matRAS missing translation (Niivue limitation), using header.affine translation:", hdrTranslation);
-                        } else {
-                            // matRAS has translation (unusual), but we prefer header.affine as authoritative source
-                            console.log("Download: Using header.affine translation (authoritative):", hdrTranslation);
-                            console.log("Download: matRAS translation was:", matRASTranslation);
-                        }
-                        
-                        // Build final affine matrix by combining:
-                        // - Rotation/scaling: from vol.matRAS (preserves user rotations if any)
-                        // - Translation: from hdr.affine (preserves original world coordinate origin)
-                        const finalAffineRow = [...matRASRow];
-                        finalAffineRow[3] = hdrTranslation[0];  // tx: world X origin
-                        finalAffineRow[7] = hdrTranslation[1];  // ty: world Y origin
-                        finalAffineRow[11] = hdrTranslation[2]; // tz: world Z origin
-                        
-                        // Convert to column-major for consistency
-                        currentAffineCol = [
-                            finalAffineRow[0], finalAffineRow[4], finalAffineRow[8], finalAffineRow[12],
-                            finalAffineRow[1], finalAffineRow[5], finalAffineRow[9], finalAffineRow[13],
-                            finalAffineRow[2], finalAffineRow[6], finalAffineRow[10], finalAffineRow[14],
-                            finalAffineRow[3], finalAffineRow[7], finalAffineRow[11], finalAffineRow[15]
-                        ];
-                        
-                        // Convert back to row-major for NIfTI export
-                        currentAffineRow = affineColToRowMajor(currentAffineCol);
-                    } else {
-                        // Fallback: use matRAS as-is if header.affine not available
-                        console.warn("Download: header.affine not available, using vol.matRAS as-is");
-                        currentAffineRow = affineColToRowMajor(currentAffineCol);
-              }
-          } else {
-                    // Fallback: try to get from header directly
-                    console.warn("Download: vol.matRAS or header.affine not available, trying header.affine directly");
-                    const hdrAffine = hdr?.affine;
-                    if (hdrAffine && Array.isArray(hdrAffine)) {
-                        if (hdrAffine.length === 16) {
-                            currentAffineRow = hdrAffine;
-                        } else if (hdrAffine.length === 4 && Array.isArray(hdrAffine[0])) {
-                            currentAffineRow = [
-                                hdrAffine[0][0], hdrAffine[0][1], hdrAffine[0][2], hdrAffine[0][3],
-                                hdrAffine[1][0], hdrAffine[1][1], hdrAffine[1][2], hdrAffine[1][3],
-                                hdrAffine[2][0], hdrAffine[2][1], hdrAffine[2][2], hdrAffine[2][3],
-                                hdrAffine[3][0], hdrAffine[3][1], hdrAffine[3][2], hdrAffine[3][3]
-                            ];
-          }
-                    }
-                    if (!currentAffineRow) {
-                        throw new Error("Cannot determine affine for download");
-                    }
-                }
-                
-                // Ensure currentAffineRow is set (should be set above, but double-check)
-                if (!currentAffineRow) {
-                    if (currentAffineCol && currentAffineCol.length === 16) {
-                        currentAffineRow = affineColToRowMajor(currentAffineCol);
-                    } else {
-                        throw new Error("Cannot determine affine for download - both matRAS and header.affine unavailable");
-                    }
-                }
-                
-                // Debug: Log the final affine being used
-                const finalTranslation = [currentAffineRow[3], currentAffineRow[7], currentAffineRow[11]];
-                console.log("Download: Final affine translation (will be written to both sform and qform):", finalTranslation);
-                if (Math.abs(finalTranslation[0]) < 1e-6 && Math.abs(finalTranslation[1]) < 1e-6 && Math.abs(finalTranslation[2]) < 1e-6) {
-                    console.error("Download: ERROR - Final affine translation is [0,0,0]! File will be misaligned in MITK.");
-                }
-                
-                // CRITICAL: Extract voxel spacing from the final affine matrix
-                // 
-                // WHY THIS IS NECESSARY:
-                // The affine matrix contains the actual transformation (rotation + scaling + translation).
-                // The scaling is encoded in the 3x3 rotation/scaling part as the length of each column vector.
-                // We MUST extract spacing from the affine to ensure pixDims matches the actual scaling,
-                // otherwise the exported volume will have incorrect scaling and won't match the STL/FOV mask.
-                //
-                // HOW IT WORKS:
-                // In a 4x4 affine matrix (row-major), the 3x3 rotation/scaling part is:
-                //   [m00 m01 m02 tx]
-                //   [m10 m11 m12 ty]
-                //   [m20 m21 m22 tz]
-                //   [  0   0   0  1]
-                // The column vectors represent the direction and scale of each voxel axis.
-                // The length of each column vector is the voxel spacing in that direction.
-                const extractSpacingFromAffine = (affineRow) => {
-                    // Column vectors (in row-major format):
-                    // col0 (X-axis): [affineRow[0], affineRow[4], affineRow[8]]
-                    // col1 (Y-axis): [affineRow[1], affineRow[5], affineRow[9]]
-                    // col2 (Z-axis): [affineRow[2], affineRow[6], affineRow[10]]
-                    const sx = Math.hypot(affineRow[0], affineRow[4], affineRow[8]);
-                    const sy = Math.hypot(affineRow[1], affineRow[5], affineRow[9]);
-                    const sz = Math.hypot(affineRow[2], affineRow[6], affineRow[10]);
-                    return [sx, sy, sz];
-                };
-                
-                const extractedSpacing = extractSpacingFromAffine(currentAffineRow);
-                const originalPixDims = [Math.abs(pixDims[1]), Math.abs(pixDims[2]), Math.abs(pixDims[3])];
-                console.log("Download: Extracted spacing from affine:", extractedSpacing);
-                console.log("Download: Original pixDims:", originalPixDims);
-                console.log("Download: Spacing difference:", [
-                    extractedSpacing[0] - originalPixDims[0],
-                    extractedSpacing[1] - originalPixDims[1],
-                    extractedSpacing[2] - originalPixDims[2]
-                ]);
-                
-                // Use extracted spacing to ensure affine and pixDims match
-                const finalPixDims = extractedSpacing;
-
-                // Create NIfTI file with the combined affine matrix
-                // currentAffineRow now contains the COMPLETE affine:
-                //   - Rotation/scaling: from vol.matRAS (includes any user-applied rotations)
-                //   - Translation: from hdr.affine (original world coordinate origin)
-                //
-                // finalPixDims is extracted from the affine to ensure consistency
-                // NVImage.createNiftiArray() will set the sform with this affine
-                let niftiData = NVImage.createNiftiArray(
-                    [dims[1], dims[2], dims[3]],
-                    finalPixDims, // Use spacing extracted from affine, not original pixDims
-                    currentAffineRow, // This sets the sform with correct translation and scaling
-                    datatypeCode,
-                    vol.img
-                );
-                
-                // CRITICAL: Set qform to match sform
-                // Why this is necessary:
-                // - Niivue uses sform when sform_code >= qform_code (standard NIfTI behavior)
-                // - MITK prefers qform when qform_code > 0
-                // - If qform and sform don't match, MITK will display the volume at the wrong position
-                // - By setting both to the same transformation, both viewers will align correctly
-                niftiData = setNiftiQform(niftiData, currentAffineRow, 2);
-                
-                // Download as file
-                const blob = new Blob([niftiData], { type: "application/octet-stream" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                const fname = vol.name && vol.name.length > 0 ? vol.name : "volume.nii";
-                a.download = fname.endsWith(".gz") ? fname : fname + ".nii";
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                setTimeout(() => URL.revokeObjectURL(url), 10000);
-                
-                setStatus(`Downloaded: STL + fov-mask.nii + ${a.download}`);
-              } catch (e) {
-                console.error("Failed to download NIfTI:", e);
-                setStatus(`STL + mask ok, volume NIfTI error: ${e.message}`);
-              }
+              downloadVolume(nv.volumes[0]);
             }, 300);
           }
-
           setStatus(`Downloading: STL + fov-mask.nii + volume...`);
         } catch (e) {
-              console.error(e);
+          console.error(e);
           setStatus(`Download error: ${e?.message ?? String(e)}`);
+        }
+      });
+
+      resampleToFov?.addEventListener("click", async () => {
+        if (!pyodide) {
+          setStatus("Pyodide not loaded yet");
+          return;
+        }
+        if (!nv.volumes?.length) {
+          setStatus("No volume loaded");
+          return;
+        }
+        
+        try {
+          resampleToFov.disabled = true;
+          setStatus("Preparing resampling...");
+          
+          const sourceBytes = getVolumeNifti(nv.volumes[0]);
+          const referenceBytes = generateFovMaskNifti();
+          
+          setStatus("Running Python resampling (Pyodide)...");
+          
+          // Pass bytes to Python
+          pyodide.globals.set("source_bytes", sourceBytes);
+          pyodide.globals.set("reference_bytes", referenceBytes);
+          
+          let result = await pyodide.runPythonAsync(`
+            run_resampling(source_bytes, reference_bytes)
+          `);
+          
+          let resultBytes;
+          // In Pyodide, Python 'bytes' are returned as PyBuffer or PyProxy
+          if (result && typeof result.toJs === 'function') {
+            resultBytes = result.toJs();
+            result.destroy();
+          } else {
+            resultBytes = result;
           }
+          
+          console.log("Resampled NIfTI bytes length:", resultBytes.length);
+          const magic = new TextDecoder().decode(resultBytes.slice(344, 347));
+          console.log("NIfTI Magic:", magic);
+          
+          setStatus("Resampling complete, loading into Niivue...");
+          
+          const blob = new Blob([resultBytes], { type: "application/octet-stream" });
+          const url = URL.createObjectURL(blob);
+          const volName = (nv.volumes[0].name || "volume").replace(/\.nii(\.gz)?$/, "") + "_resampled.nii";
+          
+          await nv.addVolumesFromUrl([{ 
+            url, 
+            name: volName,
+            colormap: "gray",
+            opacity: 1.0
+          }]);
+          
+          updateVolumeList();
+          setStatus(`✓ Resampled: ${volName}`);
+        } catch (e) {
+          console.error("Resampling failed:", e);
+          setStatus(`Resampling error: ${e.message}`);
+        } finally {
+          resampleToFov.disabled = false;
+        }
       });
 
       function updateVolumeList() {
@@ -2054,6 +2082,21 @@
           name.style.textOverflow = "ellipsis";
           name.style.overflow = "hidden";
           name.style.fontSize = "11px";
+          name.style.flex = "1";
+
+          const actions = document.createElement("div");
+          actions.style.display = "flex";
+          actions.style.gap = "4px";
+
+          const dlBtn = document.createElement("button");
+          dlBtn.innerHTML = "↓";
+          dlBtn.className = "btn";
+          dlBtn.style.padding = "0 6px";
+          dlBtn.style.height = "20px";
+          dlBtn.style.lineHeight = "18px";
+          dlBtn.style.minWidth = "auto";
+          dlBtn.title = "Download this volume as NIfTI";
+          dlBtn.onclick = () => downloadVolume(vol);
 
           const removeBtn = document.createElement("button");
           removeBtn.textContent = "×";
@@ -2070,7 +2113,9 @@
           left.appendChild(cb);
           left.appendChild(name);
           row.appendChild(left);
-          row.appendChild(removeBtn);
+          actions.appendChild(dlBtn);
+          actions.appendChild(removeBtn);
+          row.appendChild(actions);
           volumeListContainer.appendChild(row);
         });
       }
