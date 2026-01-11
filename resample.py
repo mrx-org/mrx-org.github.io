@@ -159,6 +159,12 @@ def resample_to_reference(source_img, reference_img, order=3):
         header=new_header
     )
     
+    # CRITICAL: Sync both sform AND qform to the reference affine
+    # nibabel only sets sform by default - qform keeps old values from copied header
+    # MITK prefers qform, causing misalignment if not synced
+    resampled_img.set_sform(reference_affine, code=2)
+    resampled_img.set_qform(reference_affine, code=2)
+    
     # Ensure header zooms are correct: spatial from reference, others from source
     ref_zooms = reference_img.header.get_zooms()[:3]
     src_zooms = source_img.header.get_zooms()

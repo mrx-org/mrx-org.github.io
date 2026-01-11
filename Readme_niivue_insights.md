@@ -124,6 +124,56 @@ This method is robust against any initial rotation or translation of the STL and
 
 ---
 
+## Python/Nibabel Resampling: Critical qform/sform Pitfall
+
+### The Problem
+When resampling a NIfTI and copying the source header:
+```python
+new_header = source_img.header.copy()
+resampled_img = nib.Nifti1Image(resampled_data, reference_affine, header=new_header)
+```
+
+**Nibabel only sets `sform` from the affine parameter!** The `qform` retains the old values from the copied source header.
+
+### Symptoms
+- **Niivue**: Displays correctly (uses sform)
+- **MITK**: Misaligned (prefers qform when `qform_code > 0`)
+
+### The Fix
+Explicitly synchronize both forms after creating the image:
+```python
+resampled_img.set_sform(reference_affine, code=2)
+resampled_img.set_qform(reference_affine, code=2)
+```
+
+---
+
+## Niivue Export: Avoid Mixing Affine Sources
+
+### The Problem
+When exporting a volume from Niivue, there are two potential affine sources:
+- `vol.matRAS`: Niivue's internal rendering matrix (may be modified during loading)
+- `hdr.affine`: The sform/qform read from the NIfTI header
+
+**Mixing rotation from `matRAS` with translation from `hdr.affine` causes small alignment offsets** if they don't match exactly.
+
+### The Fix
+Use `hdr.affine` as the **single authoritative source** when exporting:
+```javascript
+// Priority: Use hdr.affine (sform from file) as primary source
+if (hdr?.affine) {
+    currentAffineRow = parseAffine(hdr.affine);
+}
+// Only fall back to matRAS if hdr.affine not available
+if (!currentAffineRow && vol.matRAS) {
+    currentAffineRow = affineColToRowMajor(vol.matRAS);
+}
+```
+
+This preserves the exact affine that was set (e.g., from Python resampling) without Niivue's internal modifications.
+
+---
+
 ## Voxel Center vs. Corner (+0.5 Correction)
 
 When aligning a discrete NIfTI mask with a continuous STL mesh, there is often an ambiguity regarding whether coordinates refer to **voxel centers** or **voxel corners**.
