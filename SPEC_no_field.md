@@ -33,10 +33,10 @@ The dashboard uses a "Slot" system to dynamically swap components between `Plann
 |                   |                                         |
 +-------------------------------------------------------------+
 |                slot-footer (Full Width)                     |
-| +-----------------------+ +-------------------------------+ |
-| | col-tree              | | col-params                    | |
-| | [SequenceExplorer     | | [SequenceExplorer             | |
-| |  Sequences]           | |  Protocol]                    | |
-| +-----------------------+ +-------------------------------+ |
+| +-------------------+----------+--------------------------+ |
+| | col-tree          | col-scan | col-params               | |
+| | [SequenceExplorer |          | [SequenceExplorer        | |
+| |  Sequences]       |          |  Protocol]               | |
+| +-------------------+----------+--------------------------+ |
 +-------------------------------------------------------------+
 ```

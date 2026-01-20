@@ -40,6 +40,8 @@ export class SequenceExplorer {
             onlySeqPrefix: config.onlySeqPrefix !== undefined ? config.onlySeqPrefix : true,
             sources: config.sources || [],
             onSequenceSelect: config.onSequenceSelect || null,
+            onFunctionStart: config.onFunctionStart || null,
+            onFunctionExecute: config.onFunctionExecute || null,
             pyodide: config.pyodide || null,
             showRefresh: config.showRefresh !== undefined ? config.showRefresh : true,
             showFilter: config.showFilter !== undefined ? config.showFilter : true,
@@ -156,27 +158,8 @@ export class SequenceExplorer {
     }
     
     render() {
-        const filterHtml = this.config.showFilter ? `
-            <label>
-                <input type="checkbox" id="seq-filter-checkbox" ${this.filterSeqPrefix ? 'checked' : ''}>
-                <span>Only seq_ or main fcts</span>
-            </label>
-        ` : '';
-        
-        const refreshHtml = this.config.showRefresh ? `
-            <button id="seq-refresh-btn" class="btn primary">
-                Refresh
-            </button>
-        ` : '';
-        
-        const addSourcesHtml = `
-            <button id="seq-add-sources-btn" class="btn primary" style="margin-left: 0.5rem;">
-                Add Sources
-            </button>
-        `;
-        
         const showConsoleHtml = `
-            <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.875rem; color: var(--text); margin-left: 0.5rem;">
+            <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.875rem; color: var(--text); margin-left: auto;">
                 <input type="checkbox" id="seq-show-console-checkbox" style="margin-right: 0.5rem; cursor: pointer; width: 1rem; height: 1rem;">
                 <span>show console</span>
             </label>
@@ -190,13 +173,7 @@ export class SequenceExplorer {
             <div class="seq-explorer-panes">
                 <div class="seq-explorer-left-pane">
                     <div id="seq-explorer-section">
-                        <div style="margin-bottom: 0.5rem;">
-                            <h3 class="section-title" style="margin: 0;">Sequences</h3>
-                        </div>
-                        <div class="seq-explorer-controls">
-                            ${filterHtml}
-                            ${refreshHtml}
-                            ${addSourcesHtml}
+                        <div class="seq-explorer-controls" style="margin-bottom: 0.5rem; display: flex; justify-content: flex-end;">
                             ${showConsoleHtml}
                         </div>
                         <div id="seq-tree" class="seq-explorer-tree"></div>
@@ -247,37 +224,6 @@ export class SequenceExplorer {
                 </div>
             </div>
         `;
-        
-        // Event listeners
-        if (this.config.showFilter) {
-            const checkbox = this.container.querySelector('#seq-filter-checkbox');
-            if (checkbox) {
-                // Ensure checkbox state matches filter state
-                checkbox.checked = this.filterSeqPrefix;
-                checkbox.addEventListener('change', (e) => {
-                    this.filterSeqPrefix = e.target.checked;
-                    console.log('Filter changed:', this.filterSeqPrefix ? 'Only seq_ or main' : 'All functions');
-                    this.renderTree();
-                });
-            }
-        }
-        
-        if (this.config.showRefresh) {
-            const refreshBtn = this.container.querySelector('#seq-refresh-btn');
-            if (refreshBtn) {
-                refreshBtn.addEventListener('click', () => {
-                    this.loadSequences();
-                });
-            }
-        }
-        
-        // Add Sources button
-        const addSourcesBtn = this.container.querySelector('#seq-add-sources-btn');
-        if (addSourcesBtn) {
-            addSourcesBtn.addEventListener('click', () => {
-                this.showSourceEditor();
-            });
-        }
         
         // Execute button event listener
         const executeBtn = this.container.querySelector('#seq-execute-btn');
@@ -1164,14 +1110,19 @@ json.dumps(functions)
         console.log('Rendering tree. Filter enabled:', this.filterSeqPrefix, 'Total sequences:', Object.keys(this.sequences).length);
         
         let headingHtml = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
                 <h3 class="section-title" style="margin: 0;">Sequences</h3>
-                ${this.config.showFilter ? `
-                <label style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; color: var(--muted); cursor: pointer; user-select: none;">
-                    <input type="checkbox" id="seq-filter-checkbox" ${this.filterSeqPrefix ? 'checked' : ''} style="width: 0.8rem; height: 0.8rem; margin: 0; cursor: pointer;">
-                    <span>Only seq_ or main</span>
-                </label>
-                ` : ''}
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    ${this.config.showFilter ? `
+                    <label style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; color: var(--muted); cursor: pointer; user-select: none;">
+                        <input type="checkbox" id="seq-filter-checkbox" ${this.filterSeqPrefix ? 'checked' : ''} style="width: 0.8rem; height: 0.8rem; margin: 0; cursor: pointer;">
+                        <span>Only seq_ or main</span>
+                    </label>
+                    ` : ''}
+                    <button id="seq-add-sources-btn" class="btn primary" style="padding: 0.2rem 0.5rem; font-size: 0.7rem; height: auto;">
+                        Add Sources
+                    </button>
+                </div>
             </div>
         `;
 
@@ -1318,6 +1269,15 @@ json.dumps(functions)
                     this.renderTree();
                 });
             }
+        }
+        
+        // Add event listener for add sources button
+        const addSourcesBtn = treeEl.querySelector('#seq-add-sources-btn');
+        if (addSourcesBtn) {
+            addSourcesBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.showSourceEditor();
+            });
         }
         
         // Event listeners for source headers (collapse/expand)
@@ -1882,6 +1842,11 @@ json.dumps(_result)
         if (!executeBtn) return;
         
         console.log('Plotting started for sequence:', this.selectedSequence.fileName);
+        
+        if (this.config.onFunctionStart) {
+            this.config.onFunctionStart(this.selectedSequence);
+        }
+
         executeBtn.disabled = true;
         executeBtn.textContent = 'Plotting...';
         
