@@ -87,8 +87,8 @@ export class SequenceExplorer {
                         <div id="seq-current-name" style="font-size: 0.7rem; color: var(--muted); margin-top: 0.25rem; cursor: help;" title=""></div>
                     </div>
                     <div style="display: flex; gap: 0.5rem; align-items: center;">
-                        <button id="seq-edit-btn" class="btn">edit seq</button>
-                        <button id="seq-execute-btn" class="btn primary">plot seq</button>
+                        <button id="seq-edit-btn" class="btn btn-secondary btn-md">edit seq</button>
+                        <button id="seq-execute-btn" class="btn btn-secondary btn-md">plot seq</button>
                     </div>
                 </div>
                 <div id="seq-error-display" style="display: none; margin-bottom: 0.75rem; padding: 0.5rem 0.75rem; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.5); border-radius: 4px; color: #ef4444; font-size: 0.8rem; word-break: break-word;"></div>
@@ -1133,7 +1133,7 @@ json.dumps(functions)
                         <span>Only seq_ or main</span>
                     </label>
                     ` : ''}
-                    <button id="seq-add-sources-btn" class="btn primary" style="padding: 0.2rem 0.5rem; font-size: 0.7rem; height: auto;">
+                    <button id="seq-add-sources-btn" class="btn btn-secondary btn-sm">
                         Add Sources
                     </button>
                 </div>
@@ -1725,59 +1725,48 @@ json.dumps(_result)
         
         if (params.length === 0) {
             const noParamsDiv = document.createElement('div');
-            noParamsDiv.style.cssText = 'padding: 1rem; text-align: center; color: var(--muted);';
-            noParamsDiv.textContent = 'No parameters';
+            noParamsDiv.className = "status-message";
+            noParamsDiv.textContent = 'No parameters available for this sequence.';
             paramsControls.appendChild(noParamsDiv);
-            
-            // Update sequence name display with docstring tooltip
             this.updateSequenceNameDisplay();
             return;
         }
         
         const table = document.createElement('table');
-        table.style.width = '100%';
-        table.style.borderCollapse = 'collapse';
+        table.className = "params-table";
         
         params.forEach(param => {
             const row = document.createElement('tr');
-            row.style.borderBottom = '1px solid var(--border)';
+            row.className = "params-table-row";
             
             // Label cell
             const labelCell = document.createElement('td');
+            labelCell.className = "params-table-label-cell";
             labelCell.textContent = param.name;
-            labelCell.style.padding = '0.4rem 0.5rem';
-            labelCell.style.fontSize = '0.8rem';
-            labelCell.style.fontWeight = '500';
-            labelCell.style.color = 'var(--muted)';
-            labelCell.style.width = '40%';
+            if (paramDocs[param.name]) {
+                labelCell.title = paramDocs[param.name];
+            } else {
+                labelCell.title = 'No description available';
+            }
             row.appendChild(labelCell);
             
             // Input cell
             const inputCell = document.createElement('td');
-            inputCell.style.padding = '0.4rem 0.5rem';
-            inputCell.style.width = '50%';
+            inputCell.className = "params-table-input-cell";
             
             let input;
             if (param.type === 'bool') {
                 const label = document.createElement('label');
-                label.style.display = 'flex';
-                label.style.alignItems = 'center';
-                label.style.cursor = 'pointer';
+                label.className = "params-checkbox-label";
                 input = document.createElement('input');
                 input.type = 'checkbox';
+                input.className = "params-checkbox";
                 input.checked = param.default === true;
-                input.style.marginRight = '0.5rem';
                 label.appendChild(input);
                 inputCell.appendChild(label);
             } else {
                 input = document.createElement('input');
-                input.style.width = '100%';
-                input.style.padding = '0.3rem 0.5rem';
-                input.style.border = '1px solid var(--border)';
-                input.style.borderRadius = '4px';
-                input.style.background = 'rgba(255, 255, 255, 0.08)';
-                input.style.color = 'var(--text)';
-                input.style.fontSize = '0.8rem';
+                input.className = "params-input";
                 
                 if (param.type === 'int' || param.type === 'float') {
                     input.type = 'number';
@@ -1796,32 +1785,20 @@ json.dumps(_result)
             
             input.id = `seq-param-${param.name}`;
             
-            // Add tooltip with parameter description if available
             if (paramDocs[param.name]) {
                 input.title = paramDocs[param.name];
-                // Also add to the label for better UX
-                labelCell.title = paramDocs[param.name];
             } else {
-                // Add "No description available" if no docstring
                 input.title = 'No description available';
-                labelCell.title = 'No description available';
             }
             
             row.appendChild(inputCell);
             
             // Type tag cell
             const typeCell = document.createElement('td');
-            typeCell.style.padding = '0.4rem 0.5rem';
-            typeCell.style.width = '10%';
-            typeCell.style.textAlign = 'right';
+            typeCell.className = "params-table-type-cell";
             const typeTag = document.createElement('span');
+            typeTag.className = "params-type-tag";
             typeTag.textContent = param.type;
-            typeTag.style.fontSize = '0.7rem';
-            typeTag.style.background = 'rgba(255, 255, 255, 0.08)';
-            typeTag.style.color = 'var(--muted)';
-            typeTag.style.padding = '0.1rem 0.3rem';
-            typeTag.style.borderRadius = '4px';
-            typeTag.style.border = '1px solid var(--border)';
             typeCell.appendChild(typeTag);
             row.appendChild(typeCell);
             
@@ -1829,20 +1806,14 @@ json.dumps(_result)
         });
         
         paramsControls.appendChild(table);
-        
-        // Update sequence name display with docstring tooltip
         this.updateSequenceNameDisplay();
         
-        // Edit button is now in the header, set up its event handler
+        // Edit button click handler (hover handled by CSS)
         const editBtn = root.querySelector('#seq-edit-btn');
         if (editBtn) {
             editBtn.onclick = () => this.showCodeEditor();
-            editBtn.onmouseover = () => {
-                editBtn.style.background = 'rgba(255, 255, 255, 0.15)';
-            };
-            editBtn.onmouseout = () => {
-                editBtn.style.background = 'rgba(255, 255, 255, 0.1)';
-            };
+            // Remove any existing hover classes to use unified CSS hover
+            editBtn.classList.remove('edit-btn-hover', 'edit-btn-normal');
         }
     }
     
@@ -2187,8 +2158,8 @@ result
         header.appendChild(title);
         
         const closeBtn = document.createElement('button');
+        closeBtn.className = 'btn btn-secondary btn-md';
         closeBtn.textContent = 'Close';
-        closeBtn.style.cssText = 'padding: 0.4rem 0.8rem; background: #555; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem;';
         closeBtn.onclick = () => {
             // Clean up matplotlib target
             const plotOutput = plotRoot ? plotRoot.querySelector('#seq-plot-output') : null;
@@ -2633,9 +2604,9 @@ sources = ${sourcesJson.replace(/"([^"]+)":/g, "'$1':").replace(/true/g, 'True')
         };
         
         const saveBtn = document.createElement('button');
+        saveBtn.className = 'btn btn-secondary btn-md';
         saveBtn.textContent = 'Save & Reload';
-        saveBtn.style.cssText = 'padding: 0.5rem 1rem; background: var(--accent, #4a9eff); color: white; border: none; border-radius: 4px; cursor: pointer;';
-         saveBtn.onclick = async () => {
+        saveBtn.onclick = async () => {
              const configCode = editor.getValue();
              try {
                  await this.loadSourcesFromConfig(configCode);
@@ -3024,19 +2995,19 @@ json.dumps(_result)
         buttonContainer.style.cssText = 'display: flex; gap: 0.5rem;';
         
         const loadOriginalBtn = document.createElement('button');
+        loadOriginalBtn.className = 'btn btn-secondary btn-md';
         loadOriginalBtn.textContent = 'Load Original';
-        loadOriginalBtn.style.cssText = 'padding: 0.4rem 0.8rem; background: rgba(255, 255, 255, 0.1); color: var(--text, #ddd); border: 1px solid var(--border, #333); border-radius: 4px; cursor: pointer; font-size: 0.875rem;';
         loadOriginalBtn.onclick = () => {
             if (editor) editor.setValue(fullCode);
         };
         
         const saveAsBtn = document.createElement('button');
+        saveAsBtn.className = 'btn btn-secondary btn-md';
         saveAsBtn.textContent = 'Save As...';
-        saveAsBtn.style.cssText = 'padding: 0.4rem 0.8rem; background: var(--accent, #4a9eff); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 500;';
         
         const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn btn-secondary btn-md';
         cancelBtn.textContent = 'Cancel';
-        cancelBtn.style.cssText = 'padding: 0.4rem 0.8rem; background: #555; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem;';
         cancelBtn.onclick = () => modal.remove();
         
         buttonContainer.appendChild(loadOriginalBtn);
@@ -3372,13 +3343,13 @@ sys.modules['__main__']._user_edited_files['${finalFileName}'] = ${JSON.stringif
             buttonContainer.style.cssText = 'display: flex; gap: 0.5rem; justify-content: flex-end;';
             
             const cancelDialogBtn = document.createElement('button');
+            cancelDialogBtn.className = 'btn btn-secondary btn-md';
             cancelDialogBtn.textContent = 'Cancel';
-            cancelDialogBtn.style.cssText = 'padding: 0.4rem 0.8rem; background: #555; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem;';
             cancelDialogBtn.onclick = () => dialog.remove();
             
             const confirmBtn = document.createElement('button');
+            confirmBtn.className = 'btn btn-secondary btn-md';
             confirmBtn.textContent = 'Save';
-            confirmBtn.style.cssText = 'padding: 0.4rem 0.8rem; background: var(--accent, #4a9eff); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 500;';
             
             confirmBtn.onclick = async () => {
                 const newName = input.value.trim();

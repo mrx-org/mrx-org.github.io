@@ -187,8 +187,8 @@ export class NiivueModule {
           <h3 class="panel-title">VIEWER</h3>
           <div class="row" style="display: flex; flex-direction: column; gap: 4px; flex-shrink: 0;">
             <div style="display: flex; gap: 4px;">
-              <button id="btn-add-file-${this.instanceId}" class="btn primary" style="flex: 1; padding: 4px 2px;">Add File</button>
-              <button id="load-demo-${this.instanceId}" class="btn primary" style="flex: 1; padding: 4px 2px;">Load demo</button>
+              <button id="btn-add-file-${this.instanceId}" class="btn btn-secondary btn-sm btn-flex">Add File</button>
+              <button id="load-demo-${this.instanceId}" class="btn btn-secondary btn-sm btn-flex">Load demo</button>
               <input id="file-${this.instanceId}" type="file" accept=".nii,.nii.gz,.gz" style="display: none;" />
             </div>
           </div>
@@ -328,10 +328,10 @@ export class NiivueModule {
             </div>
           </div>
           <div class="row" style="margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-            <button id="downloadFovMesh-${this.instanceId}" class="btn primary" type="button">
+            <button id="downloadFovMesh-${this.instanceId}" class="btn btn-secondary btn-md" type="button">
               Download FOV + NIfTI
             </button>
-            <button id="resampleToFov-${this.instanceId}" class="btn" type="button" disabled title="Wait for Pyodide to load...">
+            <button id="resampleToFov-${this.instanceId}" class="btn btn-secondary btn-md" type="button" disabled title="Wait for Pyodide to load...">
               Resample to FOV
             </button>
           </div>
@@ -1245,56 +1245,50 @@ def run_resampling(source_bytes, reference_bytes):
 
     const createHeader = (title) => {
         const h = document.createElement("div");
+        h.className = "section-header";
         h.textContent = title;
-        h.style.fontSize = "10px";
-        h.style.fontWeight = "bold";
-        h.style.color = "var(--accent)";
-        h.style.marginTop = "8px";
-        h.style.marginBottom = "4px";
-        h.style.paddingLeft = "4px";
-        h.style.borderLeft = "2px solid var(--accent)";
-        h.style.textTransform = "uppercase";
-        h.style.letterSpacing = "0.05em";
         return h;
     };
 
     const createRow = (vol, originalIndex) => {
       const row = document.createElement("div"); 
       row.className = "volume-row";
-      row.style.background = "rgba(255,255,255,0.03)";
-      row.style.border = "1px solid rgba(255,255,255,0.08)";
-      row.style.padding = "4px 8px";
-      row.style.borderRadius = "4px";
-      row.style.display = "flex";
-      row.style.alignItems = "center";
-      row.style.gap = "8px";
-      row.style.marginBottom = "4px";
-      row.style.cursor = "pointer";
+      
+      // Determine row type and classes
+      const isScan = vol.name && vol.name.startsWith('scan_');
+      const isMask = vol.name?.toLowerCase().includes("mask");
+      const isSelected = this.selectedVolume === vol;
+      
+      if (isScan) {
+          row.classList.add('scan-item');
+      } else if (isMask) {
+          row.classList.add('mask-item');
+      }
+      
+      if (isSelected) {
+          row.classList.add('selected');
+      }
 
-      // 1. Checkbox (only affects visibility/checked state)
+      // Checkbox
       const cb = document.createElement("input"); 
       cb.type = "checkbox"; 
       cb.checked = vol.opacity > 0; 
       cb.onclick = (e) => {
-          e.stopPropagation(); // Prevent row click from firing
+          e.stopPropagation();
       };
       cb.onchange = (e) => {
           e.stopPropagation();
-          const isScan = vol.name && vol.name.startsWith('scan_');
           const newOpacity = cb.checked ? (vol.opacity === 0 ? 1 : vol.opacity) : 0;
           
-          if (cb.checked) {
-              // Mutual exclusion for PHANTOMS only
-              if (!isScan) {
-                  this.nv.volumes.forEach((v, idx) => {
-                      if (idx === originalIndex) return;
-                      const isOtherScan = v.name && v.name.startsWith('scan_');
-                      if (!isOtherScan) { // It's another phantom
-                          this.nv.setOpacity(idx, 0);
-                      }
-                  });
-              }
-              // Scans are NOT mutually exclusive - multiple can be checked
+          if (cb.checked && !isScan) {
+              // Mutual exclusion for phantoms only
+              this.nv.volumes.forEach((v, idx) => {
+                  if (idx === originalIndex) return;
+                  const isOtherScan = v.name && v.name.startsWith('scan_');
+                  if (!isOtherScan) {
+                      this.nv.setOpacity(idx, 0);
+                  }
+              });
           }
           
           this.nv.setOpacity(originalIndex, newOpacity);
@@ -1302,71 +1296,46 @@ def run_resampling(source_bytes, reference_bytes):
           this.updatePreviewFromSelection();
       };
 
-      // 2. Info container (title + meta)
+      // Info container
       const info = document.createElement("div");
-      info.style.flex = "1";
-      info.style.display = "flex";
-      info.style.flexDirection = "column";
-      info.style.overflow = "hidden";
+      info.className = "volume-row-info";
 
       let titleText = vol.name || `Vol ${originalIndex + 1}`;
       let metaText = "Imported Phantom";
 
-      // Try to parse scan filename: scan_NUMBER_YYYY-MM-DD_HH-mm-ss_SequenceName.nii.gz
       const scanMatch = titleText.match(/^scan_(\d+)_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})_(.*)\.nii/);
       if (scanMatch) {
           const scanNum = scanMatch[1];
           const timeStr = scanMatch[3].replace(/-/g, ':');
           titleText = `${scanNum}. ${scanMatch[4].replace(/\.nii.*/, '')}`;
           metaText = timeStr;
-          row.style.borderLeft = "3px solid #22c55e"; // Match SCAN module "done" color
-      } else if (titleText.toLowerCase().includes("mask")) {
-          row.style.borderLeft = "3px solid #3b82f6"; // Primary blue for masks
-      } else {
-          row.style.borderLeft = "3px solid transparent";
       }
 
       const title = document.createElement("div");
+      title.className = "volume-row-title";
       title.textContent = titleText;
-      title.style.fontSize = "12px";
-      title.style.fontWeight = "500";
-      title.style.whiteSpace = "nowrap";
-      title.style.overflow = "hidden";
-      title.style.textOverflow = "ellipsis";
 
       const meta = document.createElement("div");
+      meta.className = "volume-row-meta";
       meta.textContent = metaText;
-      meta.style.fontSize = "10px";
-      meta.style.color = "var(--muted)";
-      meta.style.marginTop = "1px";
-      meta.style.opacity = "0.8";
 
       info.appendChild(title);
       info.appendChild(meta);
 
-      // 3. Actions
+      // Actions
       const actions = document.createElement("div");
-      actions.style.display = "flex";
-      actions.style.gap = "4px";
-      actions.style.alignItems = "center";
+      actions.className = "volume-row-actions";
 
       const dl = document.createElement("button"); 
       dl.innerHTML = "↓"; 
-      dl.className = "btn"; 
-      dl.style.padding = "2px 6px"; 
-      dl.style.fontSize = "10px";
-      dl.style.height = "20px";
+      dl.className = "btn volume-row-btn"; 
       dl.onclick = (e) => { e.stopPropagation(); this.downloadVolume(vol); };
 
       const rm = document.createElement("button"); 
       rm.textContent = "×"; 
-      rm.className = "btn"; 
-      rm.style.padding = "2px 6px"; 
-      rm.style.fontSize = "10px";
-      rm.style.height = "20px";
+      rm.className = "btn volume-row-btn"; 
       rm.onclick = (e) => { 
           e.stopPropagation(); 
-          // Clear selection if removing the selected volume
           if (this.selectedVolume === vol) {
               this.selectedVolume = null;
           }
@@ -1381,28 +1350,15 @@ def run_resampling(source_bytes, reference_bytes):
       actions.appendChild(rm);
       row.appendChild(actions);
 
-      // Track if this row is selected and apply visual styling
-      const isSelected = this.selectedVolume === vol;
-      if (isSelected) {
-          row.style.backgroundColor = "rgba(34, 197, 94, 0.15)"; // Light green background for selection
-          // Keep existing borderLeft but make it thicker if it's a scan
-          if (vol.name && vol.name.startsWith('scan_')) {
-              row.style.borderLeft = "4px solid #22c55e"; // Thicker border for selected scan
-          }
-      }
-
-      // Row click only affects selection (not visibility)
+      // Row click for selection
       row.onclick = (e) => {
           if (e.target === cb || e.target.closest('button')) return;
           
-          const isScan = vol.name && vol.name.startsWith('scan_');
-          // Only scans can be selected for preview
           if (isScan) {
-              // Toggle selection
               if (this.selectedVolume === vol) {
-                  this.selectedVolume = null; // Deselect
+                  this.selectedVolume = null;
               } else {
-                  this.selectedVolume = vol; // Select this one
+                  this.selectedVolume = vol;
               }
               this.updateVolumeList();
               this.updatePreviewFromSelection();
@@ -1419,7 +1375,6 @@ def run_resampling(source_bytes, reference_bytes):
 
     if (scans.length > 0) {
         this.volumeListContainer.appendChild(createHeader("Scans"));
-        // Show scans in reverse order (newest on top)
         [...scans].reverse().forEach(s => this.volumeListContainer.appendChild(createRow(s.vol, s.index)));
     }
   }
