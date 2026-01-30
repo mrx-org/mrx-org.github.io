@@ -183,6 +183,7 @@
     <!-- Hidden cache for modules when they are not in a slot -->
     <div id="module-cache" style="display: none;">
         <div id="nv-viewer-container" class="niivue-app"></div>
+        <div id="nv-scan-preview-container" class="niivue-app"></div>
         <div id="nv-controls-container" class="niivue-app"></div>
         <div id="seq-tree-container" class="seq-explorer"></div>
         <div id="seq-params-container" class="seq-explorer"></div>
@@ -191,16 +192,17 @@
     </div>
 
     <script type="module">
-        import { NiivueModule } from './niivue_app.js';
+        import { NiivueModule, ScanPreviewModule } from './niivue_app.js';
         import { SequenceExplorer } from './pypulseq/seq_explorer.js';
         import { ScanModule } from './scan_zero/scan_module.js';
         import { eventHub } from './event_hub.js';
 
         class ViewManager {
-            constructor(nvModule, seqExplorer, scanModule) {
+            constructor(nvModule, seqExplorer, scanModule, scanPreview) {
                 this.nv = nvModule;
                 this.seq = seqExplorer;
                 this.scan = scanModule;
+                this.preview = scanPreview;
                 this.currentMode = null;
                 this.slots = {
                     sidebar: document.getElementById('slot-sidebar'),
@@ -211,6 +213,7 @@
                 };
                 this.cache = {
                     nvViewer: document.getElementById('nv-viewer-container'),
+                    nvScanPreview: document.getElementById('nv-scan-preview-container'),
                     nvControls: document.getElementById('nv-controls-container'),
                     seqTree: document.getElementById('seq-tree-container'),
                     seqParams: document.getElementById('seq-params-container'),
@@ -245,9 +248,19 @@
                 this.moveToSlot('seqParams', 'params');
 
                 if (mode === 'planning') {
+                    // Side-by-side layout: main viewer (50%) + scan preview (50%)
+                    this.slots.main.style.display = 'flex';
+                    this.slots.main.style.flexDirection = 'row';
+                    this.cache.nvViewer.style.flex = '1';
+                    this.cache.nvScanPreview.style.flex = '1';
+                    this.cache.nvScanPreview.style.borderLeft = '1px solid var(--border)';
                     this.moveToSlot('nvViewer', 'main');
+                    this.moveToSlot('nvScanPreview', 'main');
                     this.slots.main.classList.remove('scrollable');
                 } else if (mode === 'sequence') {
+                    // Full width for sequence plot
+                    this.slots.main.style.display = '';
+                    this.slots.main.style.flexDirection = '';
                     this.moveToSlot('seqPlot', 'main');
                     this.slots.main.classList.add('scrollable');
                     
@@ -259,7 +272,22 @@
                 
                 // Notify Niivue to resize
                 if (this.nv && this.nv.nv) {
-                    setTimeout(() => this.nv.nv.resizeListener(), 50);
+                    setTimeout(() => {
+                        this.nv.nv.resizeListener();
+                        // Force grid layout again after resize
+                        if (typeof this.nv.nv.setMultiplanarLayout === 'function') {
+                            this.nv.nv.setMultiplanarLayout(2); // GRID
+                        }
+                    }, 50);
+                }
+                if (this.preview && this.preview.nv) {
+                    setTimeout(() => {
+                        this.preview.nv.resizeListener();
+                        // Force grid layout again after resize
+                        if (typeof this.preview.nv.setMultiplanarLayout === 'function') {
+                            this.preview.nv.setMultiplanarLayout(2); // GRID
+                        }
+                    }, 50);
                 }
             }
         }
@@ -300,6 +328,9 @@
                 const scanModule = new ScanModule();
                 scanModule.render('scan-module-container');
 
+                const scanPreview = new ScanPreviewModule();
+                scanPreview.render('nv-scan-preview-container');
+
                 // C. FETCH CONFIG IN PARALLEL
                 const configPromise = explorer.getDefaultSourcesConfig();
 
@@ -318,7 +349,7 @@
                 ]);
 
                 // 4. Initialize ViewManager
-                const viewManager = new ViewManager(nvModule, explorer, scanModule);
+                const viewManager = new ViewManager(nvModule, explorer, scanModule, scanPreview);
                 viewManager.setMode('planning');
 
                 // Load demo volume on startup
@@ -330,6 +361,7 @@
                 window.viewManager = viewManager;
                 window.nvModule = nvModule;
                 window.seqExplorer = explorer;
+                window.scanPreview = scanPreview;
 
             } catch (e) {
                 console.error("Bootstrap failed:", e);

@@ -525,8 +525,22 @@ json.dumps(versions)
         console.log(`Loaded ${totalFunctions} functions from ${fileCount} files`);
         if (totalFunctions > 0) {
             this.showStatus(`Loaded ${totalFunctions} functions from ${fileCount} files`, 'success');
+            // Auto-select the first sequence on startup
+            this.selectFirstSequence();
         } else {
             this.showStatus('No sequences found. Check console for errors.', 'error');
+        }
+    }
+    
+    selectFirstSequence() {
+        // Find the first visible function item in the tree and select it
+        const treeEl = this.treeTarget || (this.container ? this.container.querySelector('#seq-tree') : null);
+        if (!treeEl) return;
+        
+        const firstItem = treeEl.querySelector('.seq-function-item');
+        if (firstItem) {
+            firstItem.click();
+            console.log('Auto-selected first sequence:', firstItem.dataset.function);
         }
     }
     

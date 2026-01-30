@@ -1,4 +1,4 @@
-import { Niivue, NVMesh, NVImage, SLICE_TYPE, DRAG_MODE, SHOW_RENDER } from "https://unpkg.com/@niivue/niivue@0.65.0/dist/index.js";
+import { Niivue, NVMesh, NVImage, SLICE_TYPE, MULTIPLANAR_TYPE, DRAG_MODE, SHOW_RENDER } from "https://unpkg.com/@niivue/niivue@0.65.0/dist/index.js";
 import { eventHub } from "./event_hub.js";
 
 export class NiivueModule {
@@ -6,7 +6,11 @@ export class NiivueModule {
     this.instanceId = Math.random().toString(36).substr(2, 5);
     this.canvasId = `gl-${Math.random().toString(36).substr(2, 9)}`;
     this.options = options;
-    this.nv = new Niivue({ logging: false });
+    this.nv = new Niivue({ 
+      logging: false,
+      loadingText: "Load a phantom.",
+      multiplanarLayout: 2 // MULTIPLANAR_TYPE.GRID
+    });
     this.pyodide = options.pyodide || null;
     
     // State properties
@@ -85,6 +89,7 @@ export class NiivueModule {
     this.FOV_RGBA255 = new Uint8Array([255, 220, 0, 255]);
     this.isInitialized = false;
     this._initWaiters = [];
+    this.selectedVolume = null; // Track which volume is selected for preview
   }
 
   waitForInit() {
@@ -411,7 +416,6 @@ export class NiivueModule {
   async initNiivue() {
     if (!this.canvas) return;
     
-    this.nv.setMultiplanarLayout(3); 
     this.nv.opts.multiplanarShowRender = SHOW_RENDER.ALWAYS;
     if (this.showRender) this.showRender.checked = true;
     this.nv.scene.pan2Dxyzmm[3] = 0.9;
@@ -421,6 +425,7 @@ export class NiivueModule {
     
     try {
       this.nv.setSliceType(SLICE_TYPE.MULTIPLANAR);
+      this.nv.setMultiplanarLayout(MULTIPLANAR_TYPE.GRID); 
       if (this.sliceMM) this.nv.setSliceMM(this.sliceMM.checked);
       if (this.radiological) this.radiological.checked = this.nv.getRadiologicalConvention();
     } catch (e) {
@@ -1227,12 +1232,33 @@ def run_resampling(source_bytes, reference_bytes):
     if (!this.volumeListContainer) return;
     this.volumeListContainer.innerHTML = "";
     
-    // Reverse order to match scan order (newest on top)
-    const reversedVolumes = [...this.nv.volumes].reverse();
-    const reversedIndices = this.nv.volumes.map((_, i) => i).reverse();
+    const phantoms = [];
+    const scans = [];
+    
+    this.nv.volumes.forEach((vol, index) => {
+        if (vol.name && vol.name.startsWith('scan_')) {
+            scans.push({ vol, index });
+        } else {
+            phantoms.push({ vol, index });
+        }
+    });
 
-    reversedVolumes.forEach((vol, i) => {
-      const originalIndex = reversedIndices[i];
+    const createHeader = (title) => {
+        const h = document.createElement("div");
+        h.textContent = title;
+        h.style.fontSize = "10px";
+        h.style.fontWeight = "bold";
+        h.style.color = "var(--accent)";
+        h.style.marginTop = "8px";
+        h.style.marginBottom = "4px";
+        h.style.paddingLeft = "4px";
+        h.style.borderLeft = "2px solid var(--accent)";
+        h.style.textTransform = "uppercase";
+        h.style.letterSpacing = "0.05em";
+        return h;
+    };
+
+    const createRow = (vol, originalIndex) => {
       const row = document.createElement("div"); 
       row.className = "volume-row";
       row.style.background = "rgba(255,255,255,0.03)";
@@ -1245,13 +1271,35 @@ def run_resampling(source_bytes, reference_bytes):
       row.style.marginBottom = "4px";
       row.style.cursor = "pointer";
 
-      // 1. Checkbox (similar to scan list)
+      // 1. Checkbox (only affects visibility/checked state)
       const cb = document.createElement("input"); 
       cb.type = "checkbox"; 
       cb.checked = vol.opacity > 0; 
+      cb.onclick = (e) => {
+          e.stopPropagation(); // Prevent row click from firing
+      };
       cb.onchange = (e) => {
           e.stopPropagation();
-          this.nv.setOpacity(originalIndex, cb.checked ? (vol.opacity === 0 ? 1 : vol.opacity) : 0);
+          const isScan = vol.name && vol.name.startsWith('scan_');
+          const newOpacity = cb.checked ? (vol.opacity === 0 ? 1 : vol.opacity) : 0;
+          
+          if (cb.checked) {
+              // Mutual exclusion for PHANTOMS only
+              if (!isScan) {
+                  this.nv.volumes.forEach((v, idx) => {
+                      if (idx === originalIndex) return;
+                      const isOtherScan = v.name && v.name.startsWith('scan_');
+                      if (!isOtherScan) { // It's another phantom
+                          this.nv.setOpacity(idx, 0);
+                      }
+                  });
+              }
+              // Scans are NOT mutually exclusive - multiple can be checked
+          }
+          
+          this.nv.setOpacity(originalIndex, newOpacity);
+          this.updateVolumeList();
+          this.updatePreviewFromSelection();
       };
 
       // 2. Info container (title + meta)
@@ -1262,7 +1310,7 @@ def run_resampling(source_bytes, reference_bytes):
       info.style.overflow = "hidden";
 
       let titleText = vol.name || `Vol ${originalIndex + 1}`;
-      let metaText = "Imported File";
+      let metaText = "Imported Phantom";
 
       // Try to parse scan filename: scan_NUMBER_YYYY-MM-DD_HH-mm-ss_SequenceName.nii.gz
       const scanMatch = titleText.match(/^scan_(\d+)_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})_(.*)\.nii/);
@@ -1316,7 +1364,16 @@ def run_resampling(source_bytes, reference_bytes):
       rm.style.padding = "2px 6px"; 
       rm.style.fontSize = "10px";
       rm.style.height = "20px";
-      rm.onclick = (e) => { e.stopPropagation(); this.nv.removeVolume(vol); this.updateVolumeList(); };
+      rm.onclick = (e) => { 
+          e.stopPropagation(); 
+          // Clear selection if removing the selected volume
+          if (this.selectedVolume === vol) {
+              this.selectedVolume = null;
+          }
+          this.nv.removeVolume(vol); 
+          this.updateVolumeList();
+          this.updatePreviewFromSelection();
+      };
 
       row.appendChild(cb);
       row.appendChild(info);
@@ -1324,27 +1381,89 @@ def run_resampling(source_bytes, reference_bytes):
       actions.appendChild(rm);
       row.appendChild(actions);
 
-      // Make row clickable to toggle checkbox, but ignore if clicking buttons or checkbox directly
+      // Track if this row is selected and apply visual styling
+      const isSelected = this.selectedVolume === vol;
+      if (isSelected) {
+          row.style.backgroundColor = "rgba(34, 197, 94, 0.15)"; // Light green background for selection
+          // Keep existing borderLeft but make it thicker if it's a scan
+          if (vol.name && vol.name.startsWith('scan_')) {
+              row.style.borderLeft = "4px solid #22c55e"; // Thicker border for selected scan
+          }
+      }
+
+      // Row click only affects selection (not visibility)
       row.onclick = (e) => {
           if (e.target === cb || e.target.closest('button')) return;
-          cb.checked = !cb.checked;
-          this.nv.setOpacity(originalIndex, cb.checked ? (vol.opacity === 0 ? 1 : vol.opacity) : 0);
+          
+          const isScan = vol.name && vol.name.startsWith('scan_');
+          // Only scans can be selected for preview
+          if (isScan) {
+              // Toggle selection
+              if (this.selectedVolume === vol) {
+                  this.selectedVolume = null; // Deselect
+              } else {
+                  this.selectedVolume = vol; // Select this one
+              }
+              this.updateVolumeList();
+              this.updatePreviewFromSelection();
+          }
       };
+      
+      return row;
+    };
 
-      this.volumeListContainer.appendChild(row);
-    });
+    if (phantoms.length > 0) {
+        this.volumeListContainer.appendChild(createHeader("Phantoms"));
+        phantoms.forEach(p => this.volumeListContainer.appendChild(createRow(p.vol, p.index)));
+    }
+
+    if (scans.length > 0) {
+        this.volumeListContainer.appendChild(createHeader("Scans"));
+        // Show scans in reverse order (newest on top)
+        [...scans].reverse().forEach(s => this.volumeListContainer.appendChild(createRow(s.vol, s.index)));
+    }
+  }
+
+  updatePreviewFromSelection() {
+    if (!window.scanPreview) return;
+    
+    // Show the selected scan in preview (regardless of checked/visibility state)
+    if (this.selectedVolume && this.selectedVolume.sourceUrl) {
+      window.scanPreview.loadSingleScan(this.selectedVolume.sourceUrl, this.selectedVolume.name);
+    } else {
+      // No selection, clear preview
+      window.scanPreview.loadSingleScan(null, null);
+    }
   }
 
   async loadUrl(url, name, isAdding = false) {
     await this.waitForInit();
     try {
       this.setStatus(`loading: ${name??url}`);
-      if (isAdding) {
-          const isMask = name?.toLowerCase().includes("mask");
-          await this.nv.addVolumesFromUrl([{ url, name: name??"vol", colormap: isMask?"red":"gray", opacity: isMask?0.8:0.5, cal_min: isMask?0.5:undefined, cal_max: isMask?1:undefined }]);
+      
+      const isScan = name && name.startsWith('scan_');
+      const isMask = name?.toLowerCase().includes("mask");
+
+      let addedVolumes = [];
+      if (!isAdding && !isScan && !isMask) {
+          // Phantom logic: Remove all other phantoms before adding the new one
+          const toRemove = this.nv.volumes.filter(v => !v.name.startsWith('scan_') && !v.name.toLowerCase().includes("mask"));
+          toRemove.forEach(v => this.nv.removeVolume(v));
+          addedVolumes = await this.nv.addVolumesFromUrl([{ url, name: name??"vol", colormap: "gray", opacity: 1.0 }]);
       } else {
-          await this.nv.loadVolumes([{ url, name: name??"vol" }]);
+          // Scans, Masks, or explicit additions
+          addedVolumes = await this.nv.addVolumesFromUrl([{ url, name: name??"vol", colormap: isMask?"red":"gray", opacity: isMask?0.8:0.5, cal_min: isMask?0.5:undefined, cal_max: isMask?1:undefined }]);
       }
+
+      // Tag with source URL for syncing to preview
+      if (addedVolumes && addedVolumes.length > 0) {
+        addedVolumes.forEach(v => v.sourceUrl = url);
+      } else {
+        // Fallback for older Niivue or if it returns nothing
+        const v = this.nv.volumes.find(v => v.name === (name??"vol"));
+        if (v) v.sourceUrl = url;
+      }
+
       if (!isAdding || this.nv.volumes.length === 1) {
           const info = this.getVolumeInfo();
           this.voxelSpacingMm = this.estimateVoxelSpacingMm(info);
@@ -1358,9 +1477,132 @@ def run_resampling(source_bytes, reference_bytes):
           }
       }
       this.syncFovLabels(); this.updateFovMesh(); this.updateVolumeList(); 
+      
+      // If a scan was loaded, select it and update preview
+      if (isScan) {
+          const loadedVol = this.nv.volumes.find(v => v.name === (name??"vol"));
+          if (loadedVol) {
+              this.selectedVolume = loadedVol;
+              this.updateVolumeList(); // Re-render to show selection
+          }
+      }
+      
+      this.updatePreviewFromSelection();
       this.triggerHighlight();
       this.setStatus(`loaded: ${name??url}`);
     } catch (e) { this.setStatus(`Error: ${e.message}`); }
+  }
+}
+
+/**
+ * ScanPreviewModule - A lightweight, view-only Niivue instance for scan previews
+ * Displays multiplanar 2x2 grid view of the selected scan
+ */
+export class ScanPreviewModule {
+  constructor() {
+    this.instanceId = 'preview-' + Math.random().toString(36).substr(2, 5);
+    this.canvasId = `gl-preview-${Math.random().toString(36).substr(2, 9)}`;
+    this.nv = new Niivue({ 
+      logging: false,
+      loadingText: "Press scan.",
+      multiplanarLayout: 2 // MULTIPLANAR_TYPE.GRID
+    });
+    this.container = null;
+    this.canvas = null;
+    this.currentScanName = null;
+    this.isInitialized = false;
+    this._isSyncing = false;
+    this._initWaiters = [];
+  }
+
+  waitForInit() {
+    if (this.isInitialized) return Promise.resolve();
+    return new Promise(resolve => this._initWaiters.push(resolve));
+  }
+
+  render(target) {
+    this.container = typeof target === 'string' ? document.getElementById(target) : target;
+    if (!this.container) throw new Error(`Preview target not found: ${target}`);
+
+    this.container.classList.add('niivue-app');
+    this.container.innerHTML = `
+      <div class="viewer scan-preview-viewer" style="background: black; height: 100%;">
+        <canvas id="${this.canvasId}"></canvas>
+        <div class="preview-label" style="position: absolute; bottom: 8px; left: 8px; font-size: 11px; color: #888; pointer-events: none;">Scan Preview</div>
+        <div class="preview-hint" style="position: absolute; bottom: 8px; right: 8px; font-size: 11px; color: #666; pointer-events: none;">Press V to change views</div>
+      </div>
+    `;
+
+    this.canvas = this.container.querySelector(`#${this.canvasId}`);
+    
+    setTimeout(() => this.initNiivue(), 10);
+  }
+
+  async initNiivue() {
+    try {
+      await this.nv.attachToCanvas(this.canvas);
+      this.nv.setSliceType(SLICE_TYPE.AXIAL);
+      this.nv.setMultiplanarLayout(MULTIPLANAR_TYPE.GRID);
+      
+      // Set crosshair to be thinner and 50% transparent
+      this.nv.opts.crosshairColor = [0.2, 0.8, 0.2, 0.5]; // 50% transparent green
+      this.nv.opts.crosshairWidth = 0.5; // Thinner crosshair
+      
+      this.nv.drawScene();
+      
+      this.isInitialized = true;
+      this._initWaiters.forEach(fn => fn());
+      this._initWaiters = [];
+      console.log("ScanPreviewModule initialized");
+    } catch (e) {
+      console.error("ScanPreviewModule init failed:", e);
+    }
+  }
+
+  async loadSingleScan(url, name) {
+    await this.waitForInit();
+    if (this._isSyncing) return;
+    this._isSyncing = true;
+    
+    try {
+      // Remove all existing volumes
+      while (this.nv.volumes.length > 0) {
+        this.nv.removeVolume(this.nv.volumes[0]);
+      }
+      
+      if (!url) {
+        this.currentScanName = null;
+        this.updateLabel("No Scan Visible");
+        this.nv.drawScene();
+        return;
+      }
+      
+      // Load the single scan
+      await this.nv.addVolumesFromUrl([{ 
+        url, 
+        name: name ?? "scan", 
+        colormap: "gray", 
+        opacity: 1.0 
+      }]);
+      
+      this.currentScanName = name;
+      this.nv.drawScene();
+      
+      // Update label with clean name
+      let cleanName = (name || "scan").replace(/^scan_\d+_/, '').replace(/\.nii.*/, '');
+      this.updateLabel(cleanName);
+      
+      console.log("ScanPreviewModule loaded:", name);
+    } catch (e) {
+      console.error("ScanPreviewModule load failed:", e);
+    } finally {
+      this._isSyncing = false;
+    }
+  }
+
+  updateLabel(text) {
+    const label = this.container?.querySelector('.preview-label');
+    if (label) label.textContent = text || 'Scan Preview';
   }
 }
 

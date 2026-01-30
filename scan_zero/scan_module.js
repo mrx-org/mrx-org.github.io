@@ -365,15 +365,33 @@ data
                 console.log("ScanModule: Volume already loaded, switching focus to:", targetName);
             }
 
-            // 3. Set opacity: 1 for this one, 0 for all others
+            // 3. Set opacity: 1 for this one, 0 for all other SCANS, keep PHANTOMS as they are
             if (volumeIndex !== -1) {
+                const targetVol = nvMod.nv.volumes[volumeIndex];
+                
                 nvMod.nv.volumes.forEach((vol, idx) => {
-                    nvMod.nv.setOpacity(idx, idx === volumeIndex ? 1.0 : 0);
+                    const isTargetScan = idx === volumeIndex;
+                    const isOtherScan = vol.name && vol.name.startsWith('scan_') && idx !== volumeIndex;
+                    
+                    if (isTargetScan) {
+                        nvMod.nv.setOpacity(idx, 1.0);
+                    } else if (isOtherScan) {
+                        nvMod.nv.setOpacity(idx, 0);
+                    }
+                    // Phantoms (non-scan names) are left untouched
                 });
                 
-                // 4. Update the volume list UI checkboxes
+                // 4. Select this volume for preview
+                nvMod.selectedVolume = targetVol;
+                
+                // 5. Update the volume list UI checkboxes
                 if (typeof nvMod.updateVolumeList === 'function') {
                     nvMod.updateVolumeList();
+                }
+                
+                // 6. Update preview (will show selected volume if it's checked)
+                if (typeof nvMod.updatePreviewFromSelection === 'function') {
+                    nvMod.updatePreviewFromSelection();
                 }
             }
         }
