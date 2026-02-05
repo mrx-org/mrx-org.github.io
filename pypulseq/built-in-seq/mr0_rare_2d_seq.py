@@ -199,4 +199,25 @@ else:
 seq.plot()
 
 
+def prot_RARE_2D(
+    fov=(200e-3, 200e-3, 8e-3),
+    Nread=32,
+    Nphase=32,
+    Npart=1,
+    FA=90 * np.pi / 180,
+    FA_ref=180 * np.pi / 180,
+    TE=5e-3,
+    slice_thickness=8e-3,
+    experiment_id="RARE_2D",
+    system=None,
+    TI_s=0,
+    r_spoil=2,
+    PE_grad_on=True,
+    RO_grad_on=True,
+    dwell=50e-6 * 2,
+):
+    kwargs = locals().copy()
+
+    return seq_RARE_2D(**kwargs)
+
 
