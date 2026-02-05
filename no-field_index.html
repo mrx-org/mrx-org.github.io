@@ -193,8 +193,18 @@
         <header>
             <div class="header-content">
                 <div class="header-title">No-field <span class="header-subtitle">Scanner</span></div>
+                <button type="button" id="credits-btn" class="credits-btn" title="Credits &amp; dependencies"><i class="bi bi-award" aria-hidden="true"></i></button>
             </div>
         </header>
+        <div id="credits-overlay" class="credits-overlay" hidden>
+            <div class="credits-modal">
+                <div class="credits-modal-header">
+                    <h2 class="credits-modal-title">Credits</h2>
+                    <button type="button" id="credits-close" class="credits-close" title="Close"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+                </div>
+                <div id="credits-content" class="credits-content">Loading…</div>
+            </div>
+        </div>
         
         <div class="lab-grid">
             <div id="slot-sidebar"></div>
@@ -396,6 +406,36 @@
         }
 
         bootstrap();
+
+        // Credits popup
+        (function () {
+            const btn = document.getElementById('credits-btn');
+            const overlay = document.getElementById('credits-overlay');
+            const content = document.getElementById('credits-content');
+            const closeBtn = document.getElementById('credits-close');
+
+            async function openCredits() {
+                overlay.hidden = false;
+                content.textContent = 'Loading…';
+                try {
+                    const res = await fetch('credits.md');
+                    const text = await res.text();
+                    const { marked } = await import('https://esm.run/marked@12.0.0');
+                    content.innerHTML = marked.parse(text);
+                } catch (e) {
+                    content.textContent = 'Could not load credits. ' + (e && e.message ? e.message : '');
+                }
+            }
+
+            function closeCredits() {
+                overlay.hidden = true;
+            }
+
+            if (btn) btn.addEventListener('click', openCredits);
+            if (closeBtn) closeBtn.addEventListener('click', closeCredits);
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) closeCredits(); });
+            document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay.hidden) closeCredits(); });
+        })();
     </script>
 </body>
 </html>
