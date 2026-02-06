@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MRX Organization</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after {
       margin: 0;
@@ -15,257 +15,274 @@
     }
 
     :root {
-      --cyan: #00f0ff;
-      --cyan-dim: #00607a;
-      --magenta: #ff00aa;
-      --magenta-dim: #6e004a;
-      --bg-deep: #06060e;
-      --bg-surface: #0a0a14;
-      --text-dim: rgba(0, 240, 255, 0.4);
+      --bg: #ffffff;
+      --text: #1a1a2e;
+      --text-secondary: #555;
+      --border: #e0e0e0;
+      --accent: #0066cc;
+      --accent-light: #e8f0fe;
+      --section-gap: 4rem;
     }
 
-    html, body {
-      height: 100%;
-      overflow-x: hidden;
+    html {
+      scroll-behavior: smooth;
     }
 
     body {
-      font-family: 'Share Tech Mono', monospace;
-      background: var(--bg-deep);
-      color: var(--cyan);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      font-size: 17px;
+    }
+
+    /* ── Hero: Logo zentriert im Viewport ── */
+    .hero {
+      min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      min-height: 100vh;
-      position: relative;
-    }
-
-    /* ── Animated grid background ── */
-    body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      background-image:
-        linear-gradient(rgba(0, 180, 255, 0.04) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0, 180, 255, 0.04) 1px, transparent 1px);
-      background-size: 40px 40px;
-      z-index: 0;
-      animation: gridShift 20s linear infinite;
-    }
-
-    @keyframes gridShift {
-      0% { transform: translateY(0); }
-      100% { transform: translateY(40px); }
-    }
-
-    /* ── Scanline overlay ── */
-    body::after {
-      content: '';
-      position: fixed;
-      inset: 0;
-      background: repeating-linear-gradient(
-        0deg,
-        transparent,
-        transparent 2px,
-        rgba(0, 240, 255, 0.015) 2px,
-        rgba(0, 240, 255, 0.015) 4px
-      );
-      pointer-events: none;
-      z-index: 100;
-    }
-
-    /* ── Main container ── */
-    .landing {
-      position: relative;
-      z-index: 1;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 3rem;
       padding: 2rem;
-      width: 100%;
-      max-width: 900px;
     }
 
-    /* ── Logo container ── */
     .logo-wrap {
       width: 100%;
-      max-width: 700px;
-      position: relative;
-      animation: fadeInScale 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-      opacity: 0;
+      max-width: 480px;
+      animation: fadeIn 1s ease forwards;
     }
 
     .logo-wrap svg {
       width: 100%;
       height: auto;
       display: block;
-      filter: drop-shadow(0 0 30px rgba(0, 240, 255, 0.15));
     }
 
-    @keyframes fadeInScale {
-      0% {
-        opacity: 0;
-        transform: scale(0.92) translateY(12px);
-        filter: blur(8px);
-      }
-      100% {
-        opacity: 1;
-        transform: scale(1) translateY(0);
-        filter: blur(0);
-      }
-    }
-
-    /* ── Ambient glow behind logo ── */
-    .logo-wrap::before {
-      content: '';
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      width: 80%;
-      height: 60%;
-      transform: translate(-50%, -50%);
-      background: radial-gradient(ellipse, rgba(0, 240, 255, 0.08) 0%, transparent 70%);
-      pointer-events: none;
-      z-index: -1;
-    }
-
-    /* ── Tagline ── */
-    .tagline {
-      font-family: 'Share Tech Mono', monospace;
-      font-size: clamp(0.75rem, 1.8vw, 1rem);
-      letter-spacing: 0.5em;
-      text-transform: uppercase;
-      color: var(--text-dim);
+    .scroll-hint {
+      margin-top: 3rem;
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+      letter-spacing: 0.1em;
+      animation: fadeIn 1.5s ease forwards;
+      opacity: 0;
+      animation-delay: 0.5s;
       text-align: center;
-      animation: typeIn 0.8s ease forwards;
-      animation-delay: 0.8s;
-      opacity: 0;
     }
 
-    @keyframes typeIn {
-      0% { opacity: 0; transform: translateY(8px); }
-      100% { opacity: 1; transform: translateY(0); }
+    .scroll-hint span {
+      display: block;
+      margin-top: 0.5rem;
+      font-size: 1.2rem;
+      animation: bounce 2s ease-in-out infinite;
     }
 
-    /* ── Divider line ── */
-    .divider {
-      width: 200px;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, var(--cyan-dim), transparent);
-      animation: fadeIn 1s ease forwards;
-      animation-delay: 1.2s;
-      opacity: 0;
+    @keyframes bounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(6px); }
     }
 
     @keyframes fadeIn {
-      to { opacity: 1; }
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
-    /* ── Nav links ── */
-    .nav-links {
-      display: flex;
-      gap: 2.5rem;
-      flex-wrap: wrap;
-      justify-content: center;
-      animation: fadeIn 1s ease forwards;
-      animation-delay: 1.4s;
-      opacity: 0;
+    /* ── Content Area ── */
+    .content {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 0 2rem 4rem;
     }
 
-    .nav-links a {
-      font-family: 'Orbitron', monospace;
-      font-size: clamp(0.65rem, 1.2vw, 0.8rem);
+    section {
+      margin-bottom: var(--section-gap);
+    }
+
+    h2 {
+      font-size: 1.6rem;
       font-weight: 700;
-      letter-spacing: 0.25em;
-      text-transform: uppercase;
-      text-decoration: none;
-      color: var(--cyan);
-      opacity: 0.5;
-      padding: 0.6em 0;
-      position: relative;
-      transition: opacity 0.3s ease, color 0.3s ease;
+      margin-bottom: 1rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 2px solid var(--border);
+      color: var(--text);
     }
 
-    .nav-links a::after {
+    p {
+      margin-bottom: 1rem;
+      color: var(--text-secondary);
+    }
+
+    /* ── Gründer ── */
+    .founders-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .founders-list li {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 1rem 1.25rem;
+      background: #f8f9fa;
+      border-radius: 8px;
+      border-left: 3px solid var(--accent);
+    }
+
+    .founder-avatar {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: var(--accent-light);
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+
+    .founder-info strong {
+      display: block;
+      font-size: 1rem;
+      color: var(--text);
+    }
+
+    .founder-info span {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+    }
+
+    /* ── Mission ── */
+    .mission-text {
+      font-size: 1.05rem;
+      line-height: 1.8;
+    }
+
+    /* ── Roadmap / Timeline ── */
+    .timeline {
+      position: relative;
+      padding-left: 2rem;
+      list-style: none;
+    }
+
+    .timeline::before {
       content: '';
       position: absolute;
-      bottom: 0;
-      left: 0;
-      width: 0;
-      height: 1px;
-      background: var(--magenta);
-      box-shadow: 0 0 8px var(--magenta);
-      transition: width 0.3s ease;
+      left: 6px;
+      top: 4px;
+      bottom: 4px;
+      width: 2px;
+      background: var(--border);
     }
 
-    .nav-links a:hover {
-      opacity: 1;
-      color: #ffffff;
+    .timeline li {
+      position: relative;
+      margin-bottom: 2rem;
+      padding-left: 0.5rem;
     }
 
-    .nav-links a:hover::after {
-      width: 100%;
+    .timeline li:last-child {
+      margin-bottom: 0;
+    }
+
+    .timeline li::before {
+      content: '';
+      position: absolute;
+      left: -1.95rem;
+      top: 6px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid var(--bg);
+      box-shadow: 0 0 0 2px var(--accent);
+    }
+
+    .timeline li.future::before {
+      background: var(--bg);
+      border: 2px solid var(--border);
+      box-shadow: 0 0 0 2px var(--border);
+    }
+
+    .timeline-date {
+      display: inline-block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--accent);
+      background: var(--accent-light);
+      padding: 0.15em 0.6em;
+      border-radius: 4px;
+      margin-bottom: 0.3rem;
+    }
+
+    .timeline li.future .timeline-date {
+      color: var(--text-secondary);
+      background: #f0f0f0;
+    }
+
+    .timeline-title {
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 0.2rem;
+    }
+
+    .timeline-desc {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      margin: 0;
+    }
+
+    /* ── Divider ── */
+    hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: var(--section-gap) 0;
     }
 
     /* ── Footer ── */
-    .footer {
-      position: fixed;
-      bottom: 1.5rem;
-      font-size: 0.7rem;
-      letter-spacing: 0.3em;
-      color: var(--text-dim);
-      opacity: 0;
-      animation: fadeIn 1s ease forwards;
-      animation-delay: 1.8s;
-      z-index: 1;
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 2rem;
+      text-align: center;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      max-width: 720px;
+      margin: 0 auto 2rem;
     }
 
-    /* ── Floating particles ── */
-    .particle {
-      position: fixed;
-      width: 2px;
-      height: 2px;
-      border-radius: 50%;
-      pointer-events: none;
-      z-index: 0;
+    footer a {
+      color: var(--accent);
+      text-decoration: none;
     }
 
-    .particle:nth-child(1) { top: 15%; left: 10%; background: var(--cyan); animation: float 6s ease-in-out infinite; opacity: 0.3; }
-    .particle:nth-child(2) { top: 70%; left: 85%; background: var(--magenta); animation: float 8s ease-in-out infinite reverse; opacity: 0.25; }
-    .particle:nth-child(3) { top: 40%; left: 92%; background: var(--cyan); animation: float 7s ease-in-out infinite; opacity: 0.2; width: 3px; height: 3px; }
-    .particle:nth-child(4) { top: 80%; left: 20%; background: var(--magenta); animation: float 9s ease-in-out infinite reverse; opacity: 0.2; }
-    .particle:nth-child(5) { top: 25%; left: 75%; background: var(--cyan); animation: float 5s ease-in-out infinite; opacity: 0.15; width: 1px; height: 1px; }
-    .particle:nth-child(6) { top: 60%; left: 5%; background: var(--cyan); animation: float 10s ease-in-out infinite; opacity: 0.18; }
+    footer a:hover {
+      text-decoration: underline;
+    }
 
-    @keyframes float {
-      0%, 100% { transform: translateY(0) translateX(0); }
-      25% { transform: translateY(-15px) translateX(8px); }
-      50% { transform: translateY(-5px) translateX(-6px); }
-      75% { transform: translateY(-20px) translateX(4px); }
+    footer .footer-links {
+      margin-top: 0.5rem;
+    }
+
+    footer .footer-links a {
+      margin: 0 0.75rem;
     }
 
     /* ── Responsive ── */
     @media (max-width: 600px) {
-      .nav-links { gap: 1.5rem; }
-      .landing { gap: 2rem; }
+      body { font-size: 15px; }
+      .logo-wrap { max-width: 320px; }
+      h2 { font-size: 1.35rem; }
+      .founders-list li { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+      :root { --section-gap: 3rem; }
     }
   </style>
 </head>
 <body>
 
-  <!-- Floating particles -->
-  <div class="particle"></div>
-  <div class="particle"></div>
-  <div class="particle"></div>
-  <div class="particle"></div>
-  <div class="particle"></div>
-  <div class="particle"></div>
-
-  <main class="landing">
-
-    <!-- Logo SVG inlined -->
+  <!-- Hero: Logo zentriert -->
+  <div class="hero">
     <div class="logo-wrap">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 250">
         <defs>
@@ -337,22 +354,105 @@
         <circle cx="492" cy="125" r="2" fill="#ff00aa" opacity="0.5"/>
       </svg>
     </div>
+    <div class="scroll-hint">
+      Mehr erfahren
+      <span>&#8595;</span>
+    </div>
+  </div>
 
-    <p class="tagline">Building the future — one commit at a time</p>
+  <!-- Content -->
+  <main class="content">
 
-    <div class="divider"></div>
+    <!-- Gründer -->
+    <section id="gruender">
+      <h2>Gründer</h2>
+      <ul class="founders-list">
+        <li>
+          <div class="founder-avatar">JE</div>
+          <div class="founder-info">
+            <strong>Jonathan Endres</strong>
+            <span>Co-Founder</span>
+          </div>
+        </li>
+        <li>
+          <div class="founder-avatar">SW</div>
+          <div class="founder-info">
+            <strong>Simon Weinmüller</strong>
+            <span>Co-Founder</span>
+          </div>
+        </li>
+        <li>
+          <div class="founder-avatar">MZ</div>
+          <div class="founder-info">
+            <strong>Moritz Zaiss</strong>
+            <span>Co-Founder</span>
+          </div>
+        </li>
+      </ul>
+    </section>
 
-    <nav class="nav-links">
-      <a href="https://github.com/mrx-org" target="_blank" rel="noopener">GitHub</a>
-      <a href="#projects">Projects</a>
-      <a href="#about">About</a>
-      <a href="#contact">Contact</a>
-    </nav>
+    <hr>
+
+    <!-- Mission -->
+    <section id="mission">
+      <h2>Mission</h2>
+      <p class="mission-text">
+        MRX will die Welt der MRT-Forschung revolutionieren, indem KI mit wegweisenden Physik-Programmen
+        kombiniert wird, um quantitative MRT-Bildgebung schneller, zugänglicher und präziser zu machen.
+        Unser Ziel ist es, die Brücke zwischen modernster Forschung und klinischer Anwendung zu schlagen
+        &mdash; damit Patienten weltweit von besserer Diagnostik profitieren.
+      </p>
+    </section>
+
+    <hr>
+
+    <!-- Roadmap -->
+    <section id="roadmap">
+      <h2>Roadmap</h2>
+      <ul class="timeline">
+        <li>
+          <span class="timeline-date">Q1 2025</span>
+          <div class="timeline-title">Gründung & Kernteam</div>
+          <p class="timeline-desc">Zusammenstellung des Gründerteams und Definition der technologischen Vision.</p>
+        </li>
+        <li>
+          <span class="timeline-date">Q2 2025</span>
+          <div class="timeline-title">Prototyp der KI-Pipeline</div>
+          <p class="timeline-desc">Entwicklung eines ersten KI-Modells für beschleunigte MRT-Rekonstruktion.</p>
+        </li>
+        <li>
+          <span class="timeline-date">Q4 2025</span>
+          <div class="timeline-title">Partnerschaft mit Universitätskliniken</div>
+          <p class="timeline-desc">Kooperationsvereinbarungen mit führenden Forschungseinrichtungen für klinische Validierung.</p>
+        </li>
+        <li class="future">
+          <span class="timeline-date">Q1 2026</span>
+          <div class="timeline-title">Beta-Launch der Plattform</div>
+          <p class="timeline-desc">Erste Version der quantitativen MRT-Plattform für ausgewählte Forschungspartner.</p>
+        </li>
+        <li class="future">
+          <span class="timeline-date">Q3 2026</span>
+          <div class="timeline-title">Open-Source Release</div>
+          <p class="timeline-desc">Veröffentlichung der Kern-Algorithmen als Open-Source-Bibliothek für die Forschungscommunity.</p>
+        </li>
+        <li class="future">
+          <span class="timeline-date">2027</span>
+          <div class="timeline-title">Klinische Zulassung</div>
+          <p class="timeline-desc">Beginn des Zulassungsprozesses für den Einsatz in der klinischen Diagnostik.</p>
+        </li>
+      </ul>
+    </section>
 
   </main>
 
-  <footer class="footer">
-    &copy; 2026 MRX Organization
+  <!-- Footer -->
+  <footer>
+    <div>&copy; 2026 MRX Organization. Alle Rechte vorbehalten.</div>
+    <div class="footer-links">
+      <a href="#">Impressum</a>
+      <a href="#">Datenschutz</a>
+      <a href="https://github.com/mrx-org" target="_blank" rel="noopener">GitHub</a>
+    </div>
   </footer>
 
 </body>
