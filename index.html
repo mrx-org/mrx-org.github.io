@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MRX Organization</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --cyan: #00f0ff;
+      --cyan-dim: #00607a;
+      --magenta: #ff00aa;
+      --magenta-dim: #6e004a;
+      --bg-deep: #06060e;
+      --bg-surface: #0a0a14;
+      --text-dim: rgba(0, 240, 255, 0.4);
+    }
+
+    html, body {
+      height: 100%;
+      overflow-x: hidden;
+    }
+
+    body {
+      font-family: 'Share Tech Mono', monospace;
+      background: var(--bg-deep);
+      color: var(--cyan);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      position: relative;
+    }
+
+    /* ── Animated grid background ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0, 180, 255, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 180, 255, 0.04) 1px, transparent 1px);
+      background-size: 40px 40px;
+      z-index: 0;
+      animation: gridShift 20s linear infinite;
+    }
+
+    @keyframes gridShift {
+      0% { transform: translateY(0); }
+      100% { transform: translateY(40px); }
+    }
+
+    /* ── Scanline overlay ── */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 240, 255, 0.015) 2px,
+        rgba(0, 240, 255, 0.015) 4px
+      );
+      pointer-events: none;
+      z-index: 100;
+    }
+
+    /* ── Main container ── */
+    .landing {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3rem;
+      padding: 2rem;
+      width: 100%;
+      max-width: 900px;
+    }
+
+    /* ── Logo container ── */
+    .logo-wrap {
+      width: 100%;
+      max-width: 700px;
+      position: relative;
+      animation: fadeInScale 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      opacity: 0;
+    }
+
+    .logo-wrap svg {
+      width: 100%;
+      height: auto;
+      display: block;
+      filter: drop-shadow(0 0 30px rgba(0, 240, 255, 0.15));
+    }
+
+    @keyframes fadeInScale {
+      0% {
+        opacity: 0;
+        transform: scale(0.92) translateY(12px);
+        filter: blur(8px);
+      }
+      100% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+        filter: blur(0);
+      }
+    }
+
+    /* ── Ambient glow behind logo ── */
+    .logo-wrap::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 80%;
+      height: 60%;
+      transform: translate(-50%, -50%);
+      background: radial-gradient(ellipse, rgba(0, 240, 255, 0.08) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: -1;
+    }
+
+    /* ── Tagline ── */
+    .tagline {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: clamp(0.75rem, 1.8vw, 1rem);
+      letter-spacing: 0.5em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      text-align: center;
+      animation: typeIn 0.8s ease forwards;
+      animation-delay: 0.8s;
+      opacity: 0;
+    }
+
+    @keyframes typeIn {
+      0% { opacity: 0; transform: translateY(8px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Divider line ── */
+    .divider {
+      width: 200px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--cyan-dim), transparent);
+      animation: fadeIn 1s ease forwards;
+      animation-delay: 1.2s;
+      opacity: 0;
+    }
+
+    @keyframes fadeIn {
+      to { opacity: 1; }
+    }
+
+    /* ── Nav links ── */
+    .nav-links {
+      display: flex;
+      gap: 2.5rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      animation: fadeIn 1s ease forwards;
+      animation-delay: 1.4s;
+      opacity: 0;
+    }
+
+    .nav-links a {
+      font-family: 'Orbitron', monospace;
+      font-size: clamp(0.65rem, 1.2vw, 0.8rem);
+      font-weight: 700;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      text-decoration: none;
+      color: var(--cyan);
+      opacity: 0.5;
+      padding: 0.6em 0;
+      position: relative;
+      transition: opacity 0.3s ease, color 0.3s ease;
+    }
+
+    .nav-links a::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 0;
+      height: 1px;
+      background: var(--magenta);
+      box-shadow: 0 0 8px var(--magenta);
+      transition: width 0.3s ease;
+    }
+
+    .nav-links a:hover {
+      opacity: 1;
+      color: #ffffff;
+    }
+
+    .nav-links a:hover::after {
+      width: 100%;
+    }
+
+    /* ── Footer ── */
+    .footer {
+      position: fixed;
+      bottom: 1.5rem;
+      font-size: 0.7rem;
+      letter-spacing: 0.3em;
+      color: var(--text-dim);
+      opacity: 0;
+      animation: fadeIn 1s ease forwards;
+      animation-delay: 1.8s;
+      z-index: 1;
+    }
+
+    /* ── Floating particles ── */
+    .particle {
+      position: fixed;
+      width: 2px;
+      height: 2px;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .particle:nth-child(1) { top: 15%; left: 10%; background: var(--cyan); animation: float 6s ease-in-out infinite; opacity: 0.3; }
+    .particle:nth-child(2) { top: 70%; left: 85%; background: var(--magenta); animation: float 8s ease-in-out infinite reverse; opacity: 0.25; }
+    .particle:nth-child(3) { top: 40%; left: 92%; background: var(--cyan); animation: float 7s ease-in-out infinite; opacity: 0.2; width: 3px; height: 3px; }
+    .particle:nth-child(4) { top: 80%; left: 20%; background: var(--magenta); animation: float 9s ease-in-out infinite reverse; opacity: 0.2; }
+    .particle:nth-child(5) { top: 25%; left: 75%; background: var(--cyan); animation: float 5s ease-in-out infinite; opacity: 0.15; width: 1px; height: 1px; }
+    .particle:nth-child(6) { top: 60%; left: 5%; background: var(--cyan); animation: float 10s ease-in-out infinite; opacity: 0.18; }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0) translateX(0); }
+      25% { transform: translateY(-15px) translateX(8px); }
+      50% { transform: translateY(-5px) translateX(-6px); }
+      75% { transform: translateY(-20px) translateX(4px); }
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 600px) {
+      .nav-links { gap: 1.5rem; }
+      .landing { gap: 2rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Floating particles -->
+  <div class="particle"></div>
+  <div class="particle"></div>
+  <div class="particle"></div>
+  <div class="particle"></div>
+  <div class="particle"></div>
+  <div class="particle"></div>
+
+  <main class="landing">
+
+    <!-- Logo SVG inlined -->
+    <div class="logo-wrap">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 250">
+        <defs>
+          <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur1"/>
+            <feGaussianBlur in="SourceGraphic" stdDeviation="12" result="blur2"/>
+            <feGaussianBlur in="SourceGraphic" stdDeviation="20" result="blur3"/>
+            <feMerge>
+              <feMergeNode in="blur3"/>
+              <feMergeNode in="blur2"/>
+              <feMergeNode in="blur1"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+          <filter id="softGlow" x="-10%" y="-10%" width="120%" height="120%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/>
+            <feMerge>
+              <feMergeNode in="blur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+          <linearGradient id="neonCyan" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#00f0ff"/>
+            <stop offset="50%" stop-color="#00d4ff"/>
+            <stop offset="100%" stop-color="#0090ff"/>
+          </linearGradient>
+          <linearGradient id="neonMagenta" x1="0%" y1="100%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#ff00aa"/>
+            <stop offset="100%" stop-color="#ff4488"/>
+          </linearGradient>
+          <pattern id="scanlines" patternUnits="userSpaceOnUse" width="4" height="4">
+            <rect width="4" height="2" fill="rgba(0,240,255,0.03)"/>
+            <rect y="2" width="4" height="2" fill="transparent"/>
+          </pattern>
+          <pattern id="grid" patternUnits="userSpaceOnUse" width="30" height="30">
+            <path d="M 30 0 L 0 0 0 30" fill="none" stroke="rgba(0,180,255,0.07)" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+        <rect width="600" height="250" fill="#0a0a14" rx="12"/>
+        <rect width="600" height="250" fill="url(#grid)" rx="12"/>
+        <rect width="600" height="250" fill="url(#scanlines)" rx="12"/>
+        <line x1="40" y1="55" x2="180" y2="55" stroke="url(#neonCyan)" stroke-width="1" opacity="0.3"/>
+        <line x1="420" y1="55" x2="560" y2="55" stroke="url(#neonCyan)" stroke-width="1" opacity="0.3"/>
+        <line x1="40" y1="195" x2="180" y2="195" stroke="url(#neonMagenta)" stroke-width="1" opacity="0.3"/>
+        <line x1="420" y1="195" x2="560" y2="195" stroke="url(#neonMagenta)" stroke-width="1" opacity="0.3"/>
+        <polyline points="30,30 30,45 45,45" fill="none" stroke="#00f0ff" stroke-width="1.5" opacity="0.5"/>
+        <polyline points="570,30 570,45 555,45" fill="none" stroke="#00f0ff" stroke-width="1.5" opacity="0.5"/>
+        <polyline points="30,220 30,205 45,205" fill="none" stroke="#ff00aa" stroke-width="1.5" opacity="0.5"/>
+        <polyline points="570,220 570,205 555,205" fill="none" stroke="#ff00aa" stroke-width="1.5" opacity="0.5"/>
+        <polygon points="300,32 305,37 300,42 295,37" fill="none" stroke="#00f0ff" stroke-width="1" opacity="0.4"/>
+        <polygon points="300,208 305,213 300,218 295,213" fill="none" stroke="#ff00aa" stroke-width="1" opacity="0.4"/>
+        <text x="300" y="148" text-anchor="middle" font-family="'Orbitron', 'Share Tech Mono', monospace"
+              font-size="100" font-weight="900" letter-spacing="18"
+              fill="none" stroke="#ff00aa" stroke-width="4" opacity="0.15" filter="url(#neonGlow)">MRX</text>
+        <text x="300" y="148" text-anchor="middle" font-family="'Orbitron', 'Share Tech Mono', monospace"
+              font-size="100" font-weight="900" letter-spacing="18"
+              fill="none" stroke="url(#neonCyan)" stroke-width="3" opacity="0.6" filter="url(#neonGlow)">MRX</text>
+        <text x="300" y="148" text-anchor="middle" font-family="'Orbitron', 'Share Tech Mono', monospace"
+              font-size="100" font-weight="900" letter-spacing="18"
+              fill="url(#neonCyan)" stroke="#ffffff" stroke-width="0.5" filter="url(#softGlow)">MRX</text>
+        <text x="300" y="148" text-anchor="middle" font-family="'Orbitron', 'Share Tech Mono', monospace"
+              font-size="100" font-weight="900" letter-spacing="18"
+              fill="#ffffff" opacity="0.12">MRX</text>
+        <text x="300" y="180" text-anchor="middle" font-family="'Share Tech Mono', monospace"
+              font-size="11" letter-spacing="12" fill="#00f0ff" opacity="0.5" filter="url(#softGlow)">ORGANIZATION</text>
+        <circle cx="300" cy="125" r="90" fill="none" stroke="url(#neonCyan)" stroke-width="0.5" opacity="0.08"/>
+        <circle cx="300" cy="125" r="110" fill="none" stroke="url(#neonMagenta)" stroke-width="0.3" opacity="0.06"/>
+        <circle cx="108" cy="125" r="2" fill="#00f0ff" opacity="0.5"/>
+        <circle cx="492" cy="125" r="2" fill="#ff00aa" opacity="0.5"/>
+      </svg>
+    </div>
+
+    <p class="tagline">Building the future — one commit at a time</p>
+
+    <div class="divider"></div>
+
+    <nav class="nav-links">
+      <a href="https://github.com/mrx-org" target="_blank" rel="noopener">GitHub</a>
+      <a href="#projects">Projects</a>
+      <a href="#about">About</a>
+      <a href="#contact">Contact</a>
+    </nav>
+
+  </main>
+
+  <footer class="footer">
+    &copy; 2026 MRX Organization
+  </footer>
+
+</body>
+</html>
