@@ -12,6 +12,125 @@
 
 import { eventHub } from "../event_hub.js";
 
+/** HTML template builders for sequence explorer UI (single file, no extra modules). */
+const SEQ_TEMPLATES = {
+    showConsoleCheckbox() {
+        return `<label style="display: flex; align-items: center; cursor: pointer; font-size: 0.875rem; color: var(--text); margin-left: auto;">
+                <input type="checkbox" id="seq-show-console-checkbox" style="margin-right: 0.5rem; cursor: pointer; width: 1rem; height: 1rem;">
+                <span>show console</span>
+            </label>`;
+    },
+    mainLayout(showConsoleHtml) {
+        return `<div id="seq-plot-output" class="seq-plot-container">
+                <div id="seq-mpl-actual-target" class="mpl-figure-container">
+                </div>
+            </div>
+            <div class="seq-explorer-panes">
+                <div class="seq-explorer-left-pane">
+                    <div id="seq-explorer-section">
+                        <div class="seq-explorer-controls" style="margin-bottom: 0.5rem; display: flex; justify-content: flex-end;">
+                            ${showConsoleHtml}
+                        </div>
+                        <div id="seq-tree" class="seq-explorer-tree"></div>
+                    </div>
+                </div>
+                <div class="seq-explorer-right-pane">
+                    <div id="seq-params-section">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                            <div>
+                            <h3 class="section-title" style="margin: 0;">Protocol</h3>
+                                <div id="seq-current-name" style="font-size: 0.7rem; color: var(--muted); margin-top: 0.25rem; cursor: help;" title=""></div>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <button id="seq-edit-btn" style="padding: 0.4rem 0.32rem; background: rgba(255, 255, 255, 0.1); color: var(--text, #ddd); border: 1px solid var(--border, #333); border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 500;">edit code</button>
+                                <button id="seq-execute-btn" style="padding: 0.4rem 0.32rem; background: var(--accent); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 500;">plot seq</button>
+                                <button id="seq-pop-btn" style="padding: 0.4rem 0.32rem; background: rgba(255, 255, 255, 0.1); color: var(--text, #ddd); border: 1px solid var(--border, #333); border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 500;">pop seq</button>
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; padding-top: 0.5rem; border-top: 1px solid var(--border);">
+                            <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.875rem; color: var(--text);">
+                                <input type="checkbox" id="seq-dark-plot-checkbox" checked style="margin-right: 0.5rem; cursor: pointer; width: 1rem; height: 1rem;">
+                                <span>Dark plot</span>
+                            </label>
+                            <select id="seq-plot-speed-selector" style="padding: 0.25rem; background: rgba(255, 255, 255, 0.08); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 0.75rem; cursor: pointer;">
+                                <option value="full">Full plot</option>
+                                <option value="fast">Fast plot</option>
+                                <option value="faster" selected>Faster plot</option>
+                            </select>
+                        </div>
+                        <div id="seq-error-display" style="display: none; margin-bottom: 0.75rem; padding: 0.5rem 0.75rem; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.5); border-radius: 4px; color: #ef4444; font-size: 0.8rem; word-break: break-word;"></div>
+                        <div id="seq-params-controls"></div>
+                    </div>
+                </div>
+            </div>
+            <div id="seq-console-section" class="console-section">
+                <h2 class="section-title">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" style="width: 1rem; height: 1rem; display: inline-block; vertical-align: middle; margin-right: 0.4rem;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                    Console Output
+                </h2>
+                <div id="seq-console-output" class="console"></div>
+                <div id="seq-package-versions" class="versions">
+                    <span><strong>Pyodide:</strong> <span id="seq-pyodide-version">loading...</span></span>
+                    <span><strong>NumPy:</strong> <span id="seq-numpy-version">loading...</span></span>
+                    <span><strong>Matplotlib:</strong> <span id="seq-matplotlib-version">loading...</span></span>
+                    <span><strong>PyPulseq:</strong> <span id="seq-pypulseq-version">loading...</span></span>
+                    <span><strong>mrseq:</strong> <span id="seq-mrseq-version">loading...</span></span>
+                    <span><strong>ISMRMRD:</strong> <span id="seq-ismrmrd-version">loading...</span></span>
+                </div>
+            </div>`;
+    },
+    paramsSection() {
+        return `<div id="seq-params-section">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <div>
+                        <h3 class="section-title" style="margin: 0;">Protocol</h3>
+                        <div id="seq-current-name" style="font-size: 0.7rem; color: var(--muted); margin-top: 0.25rem; cursor: help;" title=""></div>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                        <button id="seq-edit-btn" class="btn btn-secondary btn-md">edit code</button>
+                        <button id="seq-execute-btn" class="btn btn-secondary btn-md">plot seq</button>
+                    </div>
+                </div>
+                <div id="seq-error-display" style="display: none; margin-bottom: 0.75rem; padding: 0.5rem 0.75rem; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.5); border-radius: 4px; color: #ef4444; font-size: 0.8rem; word-break: break-word;"></div>
+                <div id="seq-params-controls"></div>
+            </div>`;
+    },
+    plotSection() {
+        return `<div id="seq-plot-output" class="seq-plot-container">
+                <div id="seq-mpl-actual-target" class="mpl-figure-container">
+                </div>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: flex-end; margin-top: 0.5rem; padding: 0.5rem; background: rgba(0,0,0,0.2); border-radius: 4px;">
+                <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.875rem; color: var(--text); margin-right: 1rem;">
+                    <input type="checkbox" id="seq-dark-plot-checkbox" checked style="margin-right: 0.5rem; cursor: pointer; width: 1rem; height: 1rem;">
+                    <span>Dark plot</span>
+                </label>
+                <select id="seq-plot-speed-selector" style="padding: 0.25rem; background: rgba(255, 255, 255, 0.08); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 0.75rem; cursor: pointer;">
+                    <option value="full">Full plot</option>
+                    <option value="fast">Fast plot</option>
+                    <option value="faster" selected>Faster plot</option>
+                </select>
+            </div>`;
+    },
+    treeHeading(showFilter, filterChecked) {
+        const filterHtml = showFilter
+            ? `<label style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; color: var(--muted); cursor: pointer; user-select: none;">
+                        <input type="checkbox" id="seq-filter-checkbox" ${filterChecked ? 'checked' : ''} style="width: 0.8rem; height: 0.8rem; margin: 0; cursor: pointer;">
+                        <span>Only seq_/prot_ or main</span>
+                    </label>`
+            : '';
+        return `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+                <h3 class="section-title" style="margin: 0;">Sequences</h3>
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    ${filterHtml}
+                    <button id="seq-add-sources-btn" class="btn btn-secondary btn-sm">
+                        Add Sources
+                    </button>
+                </div>
+            </div>`;
+    }
+};
+
 export class SequenceExplorer {
     constructor(containerId, config = {}) {
         this.container = typeof containerId === 'string' 
@@ -78,23 +197,7 @@ export class SequenceExplorer {
     renderParams(target) {
         this.paramsTarget = typeof target === 'string' ? document.getElementById(target) : target;
         if (!this.paramsTarget) throw new Error(`Params target not found: ${target}`);
-        
-        this.paramsTarget.innerHTML = `
-            <div id="seq-params-section">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                    <div>
-                        <h3 class="section-title" style="margin: 0;">Protocol</h3>
-                        <div id="seq-current-name" style="font-size: 0.7rem; color: var(--muted); margin-top: 0.25rem; cursor: help;" title=""></div>
-                    </div>
-                    <div style="display: flex; gap: 0.5rem; align-items: center;">
-                        <button id="seq-edit-btn" class="btn btn-secondary btn-md">edit seq</button>
-                        <button id="seq-execute-btn" class="btn btn-secondary btn-md">plot seq</button>
-                    </div>
-                </div>
-                <div id="seq-error-display" style="display: none; margin-bottom: 0.75rem; padding: 0.5rem 0.75rem; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.5); border-radius: 4px; color: #ef4444; font-size: 0.8rem; word-break: break-word;"></div>
-                <div id="seq-params-controls"></div>
-            </div>
-        `;
+        this.paramsTarget.innerHTML = SEQ_TEMPLATES.paramsSection();
 
         // Bind events for the buttons in params section
         const executeBtn = this.paramsTarget.querySelector('#seq-execute-btn');
@@ -110,24 +213,7 @@ export class SequenceExplorer {
     renderPlot(target) {
         this.plotTarget = typeof target === 'string' ? document.getElementById(target) : target;
         if (!this.plotTarget) throw new Error(`Plot target not found: ${target}`);
-        
-        this.plotTarget.innerHTML = `
-            <div id="seq-plot-output" class="seq-plot-container">
-                <div id="seq-mpl-actual-target" class="mpl-figure-container">
-                </div>
-            </div>
-            <div style="display: flex; align-items: center; justify-content: flex-end; margin-top: 0.5rem; padding: 0.5rem; background: rgba(0,0,0,0.2); border-radius: 4px;">
-                <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.875rem; color: var(--text); margin-right: 1rem;">
-                    <input type="checkbox" id="seq-dark-plot-checkbox" checked style="margin-right: 0.5rem; cursor: pointer; width: 1rem; height: 1rem;">
-                    <span>Dark plot</span>
-                </label>
-                <select id="seq-plot-speed-selector" style="padding: 0.25rem; background: rgba(255, 255, 255, 0.08); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 0.75rem; cursor: pointer;">
-                    <option value="full">Full plot</option>
-                    <option value="fast">Fast plot</option>
-                    <option value="faster" selected>Faster plot</option>
-                </select>
-            </div>
-        `;
+        this.plotTarget.innerHTML = SEQ_TEMPLATES.plotSection();
 
         // Initialize plotting infrastructure for this target
         this.initPlottingInfrastructure();
@@ -158,74 +244,7 @@ export class SequenceExplorer {
     }
     
     render() {
-        const showConsoleHtml = `
-            <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.875rem; color: var(--text); margin-left: auto;">
-                <input type="checkbox" id="seq-show-console-checkbox" style="margin-right: 0.5rem; cursor: pointer; width: 1rem; height: 1rem;">
-                <span>show console</span>
-            </label>
-        `;
-        
-        this.container.innerHTML = `
-            <div id="seq-plot-output" class="seq-plot-container">
-                <div id="seq-mpl-actual-target" class="mpl-figure-container">
-                </div>
-            </div>
-            <div class="seq-explorer-panes">
-                <div class="seq-explorer-left-pane">
-                    <div id="seq-explorer-section">
-                        <div class="seq-explorer-controls" style="margin-bottom: 0.5rem; display: flex; justify-content: flex-end;">
-                            ${showConsoleHtml}
-                        </div>
-                        <div id="seq-tree" class="seq-explorer-tree"></div>
-                    </div>
-                </div>
-                <div class="seq-explorer-right-pane">
-                    <div id="seq-params-section">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                            <div>
-                            <h3 class="section-title" style="margin: 0;">Protocol</h3>
-                                <div id="seq-current-name" style="font-size: 0.7rem; color: var(--muted); margin-top: 0.25rem; cursor: help;" title=""></div>
-                            </div>
-                            <div style="display: flex; gap: 0.5rem; align-items: center;">
-                                <button id="seq-edit-btn" style="padding: 0.4rem 0.32rem; background: rgba(255, 255, 255, 0.1); color: var(--text, #ddd); border: 1px solid var(--border, #333); border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 500;">edit seq</button>
-                                <button id="seq-execute-btn" style="padding: 0.4rem 0.32rem; background: var(--accent); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 500;">plot seq</button>
-                                <button id="seq-pop-btn" style="padding: 0.4rem 0.32rem; background: rgba(255, 255, 255, 0.1); color: var(--text, #ddd); border: 1px solid var(--border, #333); border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 500;">pop seq</button>
-                            </div>
-                        </div>
-                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; padding-top: 0.5rem; border-top: 1px solid var(--border);">
-                            <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.875rem; color: var(--text);">
-                                <input type="checkbox" id="seq-dark-plot-checkbox" checked style="margin-right: 0.5rem; cursor: pointer; width: 1rem; height: 1rem;">
-                                <span>Dark plot</span>
-                            </label>
-                            <select id="seq-plot-speed-selector" style="padding: 0.25rem; background: rgba(255, 255, 255, 0.08); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 0.75rem; cursor: pointer;">
-                                <option value="full">Full plot</option>
-                                <option value="fast">Fast plot</option>
-                                <option value="faster" selected>Faster plot</option>
-                            </select>
-                        </div>
-                        <div id="seq-error-display" style="display: none; margin-bottom: 0.75rem; padding: 0.5rem 0.75rem; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.5); border-radius: 4px; color: #ef4444; font-size: 0.8rem; word-break: break-word;"></div>
-                        <div id="seq-params-controls"></div>
-                    </div>
-                </div>
-            </div>
-            <div id="seq-console-section" class="console-section">
-                <h2 class="section-title">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" style="width: 1rem; height: 1rem; display: inline-block; vertical-align: middle; margin-right: 0.4rem;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                    Console Output
-                </h2>
-                <div id="seq-console-output" class="console"></div>
-                <div id="seq-package-versions" class="versions">
-                    <span><strong>Pyodide:</strong> <span id="seq-pyodide-version">loading...</span></span>
-                    <span><strong>NumPy:</strong> <span id="seq-numpy-version">loading...</span></span>
-                    <span><strong>Matplotlib:</strong> <span id="seq-matplotlib-version">loading...</span></span>
-                    <span><strong>PyPulseq:</strong> <span id="seq-pypulseq-version">loading...</span></span>
-                    <span><strong>mrseq:</strong> <span id="seq-mrseq-version">loading...</span></span>
-                    <span><strong>ISMRMRD:</strong> <span id="seq-ismrmrd-version">loading...</span></span>
-                </div>
-            </div>
-        `;
-        
-        // Execute button event listener
+        this.container.innerHTML = SEQ_TEMPLATES.mainLayout(SEQ_TEMPLATES.showConsoleCheckbox());
         const executeBtn = this.container.querySelector('#seq-execute-btn');
         if (executeBtn) {
             executeBtn.addEventListener('click', () => {
@@ -370,6 +389,37 @@ plt.rcParams['font.size'] = 8`;
                 </div>
             </div>
         `;
+    }
+
+    /**
+     * Show a modal explaining that filenames must not start with "number_" (e.g. 1_, 8_)
+     * because that prefix is reserved for scan numbers in the scan and volume lists.
+     */
+    showReservedPrefixDialog() {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.7); z-index: 10002;
+            display: flex; align-items: center; justify-content: center;
+        `;
+        const box = document.createElement('div');
+        box.style.cssText = `
+            background: var(--bg, #1e1e1e); border: 1px solid var(--border, #333);
+            border-radius: 8px; padding: 1.25rem; max-width: 420px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        `;
+        const p = document.createElement('p');
+        p.style.cssText = 'margin: 0 0 1rem 0; color: var(--text, #ddd); font-size: 0.9rem; line-height: 1.4;';
+        p.textContent = 'Filenames cannot start with a number followed by an underscore (e.g. 1_, 8_). This prefix is reserved for scan numbers in the scan and volume lists (e.g. "8. protocol_name"). Please choose a different name.';
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-secondary btn-md';
+        btn.textContent = 'OK';
+        btn.onclick = () => overlay.remove();
+        box.appendChild(p);
+        box.appendChild(btn);
+        overlay.appendChild(box);
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+        document.body.appendChild(overlay);
     }
 
     showStatus(message, type = 'info') {
@@ -554,14 +604,14 @@ json.dumps(versions)
         throw new Error(`Source type required. Got: ${configType}. Use "file", "folder", or "module".`);
     }
 
-    /** @param {object} source - source object (canonical or legacy) */
+    /** @param {object} source - source object */
     getSourcePath(source) {
         return source?.path ?? source?.seq_func_file ?? '';
     }
 
-    /** @param {object} source - source object. Returns seq_func (call target); supports legacy base_sequence. */
+    /** @param {object} source - source object. Returns seq_func (call target). */
     getSourceBaseSequence(source) {
-        return source?.seq_func ?? source?.base_sequence ?? '';
+        return source?.seq_func ?? '';
     }
 
     /**
@@ -1177,19 +1227,14 @@ get_functions_from_module('${modulePath}', '${folderPath}')
     }
     
     async parseFile(fileName, code, source) {
-        // Parse Python code to extract functions using SourceManager
         if (!this.config.pyodide) {
-            // Fallback: simple regex parsing (less accurate)
-            this.parseFileRegex(fileName, code, source);
-            return;
+            throw new Error('Pyodide is required to parse sequence files');
         }
-        
+        await this.ensureSourceManager();
+        const pyodide = this.config.pyodide;
+        let result;
         try {
-            await this.ensureSourceManager();
-            const pyodide = this.config.pyodide;
-            
-            // Use SourceManager to parse functions (don't filter - store all functions)
-            const result = await pyodide.runPythonAsync(`
+            result = await pyodide.runPythonAsync(`
 import json
 from seq_source_manager import SourceManager
 
@@ -1197,64 +1242,25 @@ manager = SourceManager()
 functions = manager.parse_file_functions(${JSON.stringify(code)}, filter_seq_prefix=False)
 json.dumps(functions)
 `);
-            
-            const functions = JSON.parse(result);
-            
-            if (!this.sequences[fileName]) {
-                this.sequences[fileName] = { functions: [], source: source, code: code };
-            } else {
-                // Clear existing functions and update code (for overwrite scenario)
-                this.sequences[fileName].functions = [];
-                this.sequences[fileName].code = code;
-                this.sequences[fileName].source = source;
-            }
-            
-            // Store all functions (filtering happens during rendering)
-            for (const func of functions) {
-                this.sequences[fileName].functions.push({
-                    name: func.name,
-                    doc: func.doc || '',
-                    source: source
-                });
-            }
-            
-            console.log(`Parsed ${this.sequences[fileName].functions.length} functions from ${fileName}`);
         } catch (err) {
-            console.warn(`SourceManager parsing failed for ${fileName}, using regex:`, err);
-            this.parseFileRegex(fileName, code, source);
+            throw new Error(`Failed to parse ${fileName}: ${err.message}`);
         }
-    }
-    
-    parseFileRegex(fileName, code, source) {
-        // Simple regex-based function extraction (fallback)
-        const functionRegex = /^def\s+(\w+)\s*\([^)]*\)\s*:/gm;
-        const matches = [...code.matchAll(functionRegex)];
-        
+        const functions = JSON.parse(result);
         if (!this.sequences[fileName]) {
             this.sequences[fileName] = { functions: [], source: source, code: code };
         } else {
-            // Clear existing functions and update code (for overwrite scenario)
             this.sequences[fileName].functions = [];
             this.sequences[fileName].code = code;
             this.sequences[fileName].source = source;
         }
-        
-        // Don't filter during parsing - store all functions, filter during rendering
-        for (const match of matches) {
-            const funcName = match[1];
-            // Try to extract docstring
-            const funcStart = match.index;
-            const funcCode = code.substring(funcStart, funcStart + 500);
-            const docMatch = funcCode.match(/"""(.*?)"""/s) || funcCode.match(/'''(.*?)'''/s);
-            
+        for (const func of functions) {
             this.sequences[fileName].functions.push({
-                name: funcName,
-                doc: docMatch ? docMatch[1].trim() : '',
+                name: func.name,
+                doc: func.doc || '',
                 source: source
             });
         }
-        
-        // Don't render tree here - it will be called after all sources are loaded
+        console.log(`Parsed ${this.sequences[fileName].functions.length} functions from ${fileName}`);
     }
     
     renderTree(target) {
@@ -1266,22 +1272,7 @@ json.dumps(functions)
         
         console.log('Rendering tree. Filter enabled:', this.filterSeqPrefix, 'Total sequences:', Object.keys(this.sequences).length);
         
-        let headingHtml = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
-                <h3 class="section-title" style="margin: 0;">Sequences</h3>
-                <div style="display: flex; align-items: center; gap: 0.75rem;">
-                    ${this.config.showFilter ? `
-                    <label style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; color: var(--muted); cursor: pointer; user-select: none;">
-                        <input type="checkbox" id="seq-filter-checkbox" ${this.filterSeqPrefix ? 'checked' : ''} style="width: 0.8rem; height: 0.8rem; margin: 0; cursor: pointer;">
-                        <span>Only seq_/prot_ or main</span>
-                    </label>
-                    ` : ''}
-                    <button id="seq-add-sources-btn" class="btn btn-secondary btn-sm">
-                        Add Sources
-                    </button>
-                </div>
-            </div>
-        `;
+        const headingHtml = SEQ_TEMPLATES.treeHeading(this.config.showFilter, this.filterSeqPrefix);
 
         if (Object.keys(this.sequences).length === 0) {
             treeEl.innerHTML = headingHtml + '<div style="padding: 2rem; text-align: center; color: var(--muted);">No sequences loaded</div>';
@@ -1300,7 +1291,7 @@ json.dumps(functions)
         }
         
         // Group sequences by source name
-        // All user-edited files go under "User Refined"
+        // All user-edited files go under "User Refined Sequences" or "User Protocols"
         const sourceGroups = {};
         
         for (const [fileName, fileData] of Object.entries(this.sequences)) {
@@ -1308,7 +1299,7 @@ json.dumps(functions)
             if (fileData.source?.isUserEdited) {
                 const isProtocol = fileData.source?.itemKind === 'protocol' ||
                     (fileData.source?.path && fileData.source.path.startsWith('user/prot/'));
-                sourceName = isProtocol ? 'User Protocols' : 'User Refined';
+                sourceName = isProtocol ? 'User Protocols' : 'User Refined Sequences';
             }
             
             if (!sourceGroups[sourceName]) {
@@ -1346,7 +1337,7 @@ json.dumps(functions)
             const source = firstFile.source;
             // Determine type/module info to display (hide for user-edited groups)
             let typeInfo = '';
-            if (sourceName !== 'User Refined' && sourceName !== 'User Protocols') {
+            if (sourceName !== 'User Refined Sequences' && sourceName !== 'User Protocols') {
                 if (source?.type === 'pyodide_module' && source?.module) {
                     // For module sources: show module path
                     typeInfo = source.module || source.path;
@@ -2411,7 +2402,7 @@ sources = ${sourcesJson.replace(/"([^"]+)":/g, "'$1':").replace(/true/g, 'True')
         const info = document.createElement('div');
         info.innerHTML = `
             <p style="margin: 0 0 1rem 0; color: var(--text-secondary, #aaa); font-size: 0.875rem;">
-                Define sources as a Python list. Each source should have: <code>type</code> ("file" | "folder" | "module"), <code>path</code>, optional <code>name</code> (tree label), <code>seq_func</code> or <code>base_sequence</code> (entry point), <code>dependencies</code>.
+                Define sources as a Python list. Each source should have: <code>type</code> ("file" | "folder" | "module"), <code>path</code>, optional <code>name</code> (tree label), <code>seq_func</code> (entry point), <code>dependencies</code>.
             </p>
         `;
         
@@ -2545,30 +2536,6 @@ sources = ${sourcesJson.replace(/"([^"]+)":/g, "'$1':").replace(/true/g, 'True')
         }, 100);
     }
     
-    async getDefaultSourcesConfig() {
-        // Try to load from sources_config.py file
-        try {
-            const response = await fetch(this.resolvePath('sources_config.py'));
-            if (response.ok) {
-                return await response.text();
-            }
-        } catch (e) {
-            console.warn('Could not load sources_config.py:', e);
-        }
-        
-        // Fallback template if file doesn't exist
-        return `# Sources configuration for sequence explorer
-# Define sources as a list of dictionaries
-
-sources = [
-    {
-        'path': 'built_in_seq/mr0_rare_2d_seq.py',
-        'seq_func': 'seq_RARE_2D',
-        'dependencies': ['pypulseq']
-    }
-]`;
-    }
-    
     async ensureSourceManager() {
         // Ensure SourceManager is loaded and available in Pyodide
         if (!this.config.pyodide) {
@@ -2618,10 +2585,6 @@ exec(${JSON.stringify(sourceManagerCode)}, seq_source_manager.__dict__)
     async loadDefaultSources() {
         const configCode = await this.getDefaultSourcesConfig();
         await this.loadSourcesFromConfig(configCode);
-    }
-    
-    async getUserFiles() {
-        return [];
     }
 
     async loadSourcesFromConfig(configCode) {
@@ -2730,11 +2693,11 @@ sources = [
         );
         if (isModule) {
             const seqFuncFile = (source?.fullModulePath || source?.module || pathOrModule || '').replace(/\.py$/i, '');
-            const func = source?.seq_func ?? source?.base_sequence ?? functionName ?? 'main';
+            const func = source?.seq_func ?? functionName ?? 'main';
             return { seq_func_file: seqFuncFile, seq_func: func, type: 'module' };
         }
         const seqFuncFile = source?.seq_func_file ?? source?.path ?? fileName;
-        const func = source?.seq_func ?? source?.base_sequence ?? functionName ?? 'main';
+        const func = source?.seq_func ?? functionName ?? 'main';
         return { seq_func_file: seqFuncFile, seq_func: func, type: 'file' };
     }
 
@@ -3055,11 +3018,34 @@ def ${safeFunctionName}(
         header.className = 'seq-editor-header';
         
         const title = document.createElement('h2');
-        title.textContent = `Edit Sequence: ${fileName}:${functionName}`;
+        title.textContent = `Edit Code: ${fileName}:${functionName}`;
         header.appendChild(title);
         
         const buttonContainer = document.createElement('div');
-        buttonContainer.style.cssText = 'display: flex; gap: 0.5rem;';
+        buttonContainer.style.cssText = 'display: flex; gap: 0.5rem; flex-wrap: wrap;';
+        
+        const isProtocol = source?.itemKind === 'protocol' || (source?.path && source.path.startsWith('user/prot/'));
+        const seqFuncFile = source?.seq_func_file;
+        if (isProtocol && seqFuncFile) {
+            const editUnderlyingBtn = document.createElement('button');
+            editUnderlyingBtn.className = 'btn btn-secondary btn-md';
+            editUnderlyingBtn.textContent = 'Edit underlying sequence';
+            editUnderlyingBtn.onclick = async () => {
+                const underlyingSource = this.sequences[seqFuncFile]?.source ?? this.config.sources.find(s => this.getSourcePath(s) === seqFuncFile);
+                if (!underlyingSource) {
+                    this.showStatus(`Could not resolve source for ${seqFuncFile}`, 'error');
+                    return;
+                }
+                const funcName = (underlyingSource?.seq_func ?? this.getSourceBaseSequence(underlyingSource)) || 'main';
+                const fileData = this.sequences[seqFuncFile];
+                const func = fileData?.functions?.find(f => f.name === funcName) || fileData?.functions?.[0] || {};
+                const displayName = this.getProtocolDisplayNameFromSeqFuncFile(this.getPathForDisplayName(seqFuncFile, underlyingSource)) || (underlyingSource?.path || seqFuncFile).split('/').pop().replace(/\.py$/, '');
+                this.selectedSequence = { fileName: seqFuncFile, functionName: func.name || funcName, displayName, ...func, source: underlyingSource };
+                modal.remove();
+                await this.showCodeEditor();
+            };
+            buttonContainer.appendChild(editUnderlyingBtn);
+        }
         
         const loadOriginalBtn = document.createElement('button');
         loadOriginalBtn.className = 'btn btn-secondary btn-md';
@@ -3136,7 +3122,8 @@ def ${safeFunctionName}(
                 .toLowerCase();                   // Convert to lowercase
         };
         
-        // Helper function to save sequence
+        // Helper function to save (sequence or protocol; preserves parent kind)
+        const savingProtocol = source?.itemKind === 'protocol' || (source?.path && source.path.startsWith('user/prot/'));
         const saveSequence = async (targetFileName, targetName, overwrite = false) => {
             let code = editor.getValue();
             if (!code.trim()) {
@@ -3153,32 +3140,42 @@ def ${safeFunctionName}(
             
             const tomlConfig = await this.parseTOMLConfig(tomlMatch[1]);
             const metadata = tomlConfig.metadata;
-            const seqFunc = metadata.seq_func ?? metadata.base_sequence ?? functionName;
-            const seqFuncFile = metadata.seq_func_file ?? metadata.base_seq_func_file ?? '';
+            const seqFunc = metadata.seq_func ?? functionName;
+            const seqFuncFileFromMeta = metadata.seq_func_file ?? '';
             const deps = Object.keys(tomlConfig.dependencies).map(key => {
                 const val = tomlConfig.dependencies[key];
                 if (val === '*') return key;
                 return `${key}${val}`;
             });
 
-            const displayName = targetName || seqFuncFile || metadata.name || `${fileName}_edited`;
+            const displayName = targetName || seqFuncFileFromMeta || metadata.name || `${fileName}_edited`;
             const sanitizedName = sanitizeFileName(displayName);
+            if (/^\d+_/.test(sanitizedName)) {
+                this.showReservedPrefixDialog();
+                return false;
+            }
             const baseFileName = sanitizedName.endsWith('.py') ? sanitizedName : `${sanitizedName}.py`;
-            const finalFileName = `user/seq/${baseFileName}`;
+            const userDir = savingProtocol ? 'user/prot' : 'user/seq';
+            const finalFileName = `${userDir}/${baseFileName}`;
 
             const saveSource = { path: finalFileName, dependencies: deps };
-            const preamble = this.generateTOMLPreamble(finalFileName, saveSource, seqFunc, { kind: 'sequence' });
+            const preambleOptions = savingProtocol
+                ? { kind: 'protocol', seq_func_file: seqFuncFileFromMeta || source?.seq_func_file, seq_func: metadata.seq_func ?? source?.seq_func }
+                : { kind: 'sequence' };
+            const preamble = this.generateTOMLPreamble(finalFileName, saveSource, seqFunc, preambleOptions);
             const tomlBlockRegex = /# Source configuration \(TOML format\)\n_source_config_toml = """[\s\S]*?"""\n\n(?:#.*\n)*\n*/;
             code = code.replace(tomlBlockRegex, preamble);
 
+            const callTargetFile = savingProtocol ? (seqFuncFileFromMeta || source?.seq_func_file) : finalFileName;
+            const callTargetFunc = savingProtocol ? (metadata.seq_func ?? source?.seq_func ?? seqFunc) : seqFunc;
             const newSource = {
-                name: 'User Refined',
-                itemKind: 'sequence',
+                name: savingProtocol ? 'User Protocols' : 'User Refined Sequences',
+                itemKind: savingProtocol ? 'protocol' : 'sequence',
                 path: finalFileName,
-                seq_func_file: finalFileName,
-                seq_func: seqFunc,
+                seq_func_file: callTargetFile,
+                seq_func: callTargetFunc,
                 type: 'file',
-                description: metadata.description || 'User edited sequence',
+                description: metadata.description || (savingProtocol ? 'User edited protocol' : 'User edited sequence'),
                 dependencies: deps,
                 isUserEdited: true,
                 displayName: displayName
@@ -3223,7 +3220,7 @@ def ${safeFunctionName}(
                     }
                     
                     this.renderTree();
-                    this.showStatus('Sequence saved and registered!', 'success');
+                    this.showStatus(savingProtocol ? 'Protocol saved and registered!' : 'Sequence saved and registered!', 'success');
                     return true;
                 } catch (err) {
                     this.showStatus(`Error saving: ${err.message}`, 'error');
@@ -3260,9 +3257,10 @@ def ${safeFunctionName}(
             }
             defaultName = this.getProtocolDisplayNameFromSeqFuncFile(defaultName) || defaultName;
 
-            // Get existing user sequence files only (Save As is for sequences; protocols live in user/prot/)
+            const savingProtocolForDialog = source?.itemKind === 'protocol' || (source?.path && source.path.startsWith('user/prot/'));
+            const userDirPrefix = savingProtocolForDialog ? 'user/prot/' : 'user/seq/';
             const allUserFiles = await this.getUserFiles();
-            const existingFiles = allUserFiles.filter(f => f.path.startsWith('user/seq/'));
+            const existingFiles = allUserFiles.filter(f => f.path.startsWith(userDirPrefix));
             
             // Create dialog
             const dialog = document.createElement('div');
@@ -3294,7 +3292,7 @@ def ${safeFunctionName}(
             `;
             
             const dialogTitle = document.createElement('h3');
-            dialogTitle.textContent = 'Save As - User Sequences';
+            dialogTitle.textContent = savingProtocolForDialog ? 'Save As - User Protocols' : 'Save As - User Sequences';
             dialogTitle.style.cssText = 'margin: 0 0 1rem 0; color: var(--accent, #4a9eff);';
             
             // File list container
@@ -3382,7 +3380,7 @@ def ${safeFunctionName}(
             fileListContainer.appendChild(fileList);
             
             const label = document.createElement('label');
-            label.textContent = 'Sequence Name:';
+            label.textContent = savingProtocolForDialog ? 'Protocol Name:' : 'Sequence Name:';
             label.style.cssText = 'display: block; margin-bottom: 0.5rem; color: var(--text, #ddd); font-size: 0.875rem;';
             
             const input = document.createElement('input');
@@ -3418,11 +3416,14 @@ def ${safeFunctionName}(
                     alert('Please enter a name');
                     return;
                 }
-                
-                // Check if file already exists
                 const sanitizedName = sanitizeFileName(newName);
+                if (/^\d+_/.test(sanitizedName)) {
+                    this.showReservedPrefixDialog();
+                    return;
+                }
+                // Check if file already exists
                 const baseFileName = sanitizedName.endsWith('.py') ? sanitizedName : `${sanitizedName}.py`;
-                const finalFileName = `user/seq/${baseFileName}`;
+                const finalFileName = userDirPrefix + baseFileName;
                 
                 const fileExists = existingFiles.some(f => f.path === finalFileName);
                 if (fileExists && !confirm(`File "${newName}" already exists. Overwrite?`)) {
