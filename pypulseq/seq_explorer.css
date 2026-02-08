@@ -7,6 +7,23 @@
     --muted: #a9b3da;
     --border: rgba(255, 255, 255, 0.1);
     --accent: #3b82f6;
+    --error-bg: rgba(239, 68, 68, 0.12);
+    --error-border: rgba(239, 68, 68, 0.45);
+    --error-text: #ef4444;
+}
+
+/* Shared style for sequence explorer error messages (compact, smaller font) */
+#seq-error-display,
+.seq-error-message {
+    font-size: 0.72rem;
+    line-height: 1.35;
+    padding: 0.4rem 0.6rem;
+    margin-bottom: 0.6rem;
+    background: var(--error-bg);
+    border: 1px solid var(--error-border);
+    border-radius: 4px;
+    color: var(--error-text);
+    word-break: break-word;
 }
 
 * { 

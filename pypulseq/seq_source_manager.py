@@ -240,7 +240,7 @@ class SourceManager:
     
     def extract_function_parameters(self, module_path=None, function_name=None, code=None):
         """
-        Extract parameters from a function using AST first, then inspect as fallback.
+        Extract parameters from a function using inspect (requires execution or import).
         
         Args:
             module_path: Full module path (e.g., 'mrseq.scripts.t1_inv_rec_gre_single_line')
@@ -254,52 +254,6 @@ class SourceManager:
         import __main__
         
         params = []
-        
-        # Try AST-based extraction first (doesn't require execution)
-        if code and function_name:
-            try:
-                tree = ast.parse(code)
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.FunctionDef) and node.name == function_name:
-                        # Found the function in AST, extract signature
-                        num_args = len(node.args.args)
-                        num_defaults = len(node.args.defaults)
-                        default_start_idx = num_args - num_defaults
-                        
-                        for arg_index, arg in enumerate(node.args.args):
-                            param_name = arg.arg
-                            if param_name == 'system':
-                                continue
-                            
-                            # Try to get default value
-                            val = None
-                            type_name = 'None'
-                            if arg_index >= default_start_idx:
-                                default_val = node.args.defaults[arg_index - default_start_idx]
-                                try:
-                                    # Use ast.literal_eval for simple literals
-                                    val = ast.literal_eval(default_val)
-                                    type_name = type(val).__name__
-                                    if isinstance(val, (list, tuple)):
-                                        type_name = 'list'
-                                        val = list(val)
-                                except:
-                                    # For complex expressions, can't evaluate - use None
-                                    val = None
-                                    type_name = 'None'
-                            
-                            params.append({
-                                'name': param_name,
-                                'default': val,
-                                'type': type_name
-                            })
-                        
-                        return params  # Successfully extracted from AST
-            except Exception as e:
-                # AST parsing failed, fall back to execution method
-                pass
-        
-        # Fallback: Use inspect (requires execution)
         try:
             func = None
             
@@ -310,11 +264,12 @@ class SourceManager:
                 # Create a clean namespace for execution
                 exec_globals = {'__name__': '__main__', '__builtins__': __builtins__}
                 exec_globals.update(__main__.__dict__)
-                
+                exec_err = None
                 # Execute the code
                 try:
                     exec(code, exec_globals)
-                except Exception as exec_err:
+                except Exception as err:
+                    exec_err = err
                     # If execution fails, try to continue - function might still be defined
                     pass
                 
@@ -340,8 +295,14 @@ class SourceManager:
                     if function_name in all_funcs:
                         func = all_funcs[function_name]
                     else:
-                        available = [k for k in all_funcs.keys() if not k.startswith('_')]
-                        raise AttributeError(f"Function '{function_name}' not found in code. Available functions: {available}")
+                        msg = (
+                            f"Function '{function_name}' was not defined when the sequence code was run. "
+                            "This often happens when the sequence depends on packages not available in this lean browser environment "
+                            "(e.g. torch, MRzeroCore). Parameter controls cannot be loaded; you can still try to run the sequence."
+                        )
+                        if exec_err is not None:
+                            msg += f" Execution failed with: {exec_err!r}"
+                        raise AttributeError(msg)
             else:
                 raise ValueError("Either module_path or code must be provided")
             
@@ -375,6 +336,9 @@ class SourceManager:
                 })
             
             return params
+        except (AttributeError, ValueError) as e:
+            # Re-raise our clear "function not found" / "invalid args" messages as-is
+            raise
         except Exception as e:
             raise Exception(f"Failed to extract parameters: {e}")
     

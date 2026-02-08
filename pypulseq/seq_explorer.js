@@ -58,7 +58,7 @@ const SEQ_TEMPLATES = {
                                 <option value="faster" selected>Faster plot</option>
                             </select>
                         </div>
-                        <div id="seq-error-display" style="display: none; margin-bottom: 0.75rem; padding: 0.5rem 0.75rem; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.5); border-radius: 4px; color: #ef4444; font-size: 0.8rem; word-break: break-word;"></div>
+                        <div id="seq-error-display" class="seq-error-message" style="display: none;"></div>
                         <div id="seq-params-controls"></div>
                     </div>
                 </div>
@@ -91,7 +91,7 @@ const SEQ_TEMPLATES = {
                         <button id="seq-execute-btn" class="btn btn-secondary btn-md">plot seq</button>
                     </div>
                 </div>
-                <div id="seq-error-display" style="display: none; margin-bottom: 0.75rem; padding: 0.5rem 0.75rem; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.5); border-radius: 4px; color: #ef4444; font-size: 0.8rem; word-break: break-word;"></div>
+                <div id="seq-error-display" class="seq-error-message" style="display: none;"></div>
                 <div id="seq-params-controls"></div>
             </div>`;
     },
@@ -1630,7 +1630,7 @@ json.dumps(_result)
             
         } catch (error) {
             console.error('Error loading function parameters:', error);
-            paramsControls.innerHTML = `<div style="padding: 1rem; text-align: center; color: #ef4444;">Error loading parameters: ${error.message}</div>`;
+            paramsControls.innerHTML = `<div class="seq-error-message" style="display: block;">Error loading parameters: ${error.message}</div>`;
             executeBtn.disabled = true;
         }
     }
