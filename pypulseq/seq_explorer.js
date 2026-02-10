@@ -2772,7 +2772,7 @@ sources = ${sourcesJson.replace(/"([^"]+)":/g, "'$1':").replace(/true/g, 'True')
         editorContainer.style.cssText = 'flex: 1; min-height: 400px; max-height: 60vh; margin-bottom: 1rem; position: relative; overflow: hidden;';
         
         if (window.CodeMirror) {
-            // Create a textarea first (CodeMirror.fromTextArea pattern like in index.html)
+            // Create a textarea first (CodeMirror.fromTextArea pattern like in viewer.html)
             const textarea = document.createElement('textarea');
             textarea.value = currentConfig;
             editorContainer.appendChild(textarea);

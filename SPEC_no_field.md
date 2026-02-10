@@ -14,7 +14,7 @@ Unified MRI laboratory dashboard that synchronizes spatial FOV planning with pul
 - **View Management**: `ViewManager` state machine for orchestrating module placement and tracking current mode.
 
 ## Architecture
-- **Entry**: `no-field_index.html`
+- **Entry**: `index.html`
 - **Communication**: Pub/Sub `EventHub` for decoupled module interaction.
 - **Layout**: Compact header (36px) and responsive grid.
 

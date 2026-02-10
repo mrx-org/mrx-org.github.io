@@ -53,8 +53,8 @@ Since a real MRzero simulation is not yet fully integrated, the current implemen
 - `loadJob`: Interacts with `window.viewManager` to ensure the correct mode is active.
 
 ## Layout Configuration
-In the `no-field_index.html` Lab Shell, the module is integrated into the 3-column footer:
+In the `index.html` Lab Shell, the module is integrated into the 3-column footer:
 ```css
-/* Layout in no-field_index.html */
+/* Layout in index.html */
 grid-template-columns: 1fr 0.8fr 1.5fr; /* Tree | Scan | Params */
 ```

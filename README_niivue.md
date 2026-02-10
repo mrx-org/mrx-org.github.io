@@ -1,6 +1,6 @@
 # Niivue minimal app (zero-install)
 
-This is a **minimal Niivue viewer** implemented as a single `index.html` file.
+This is a **minimal Niivue viewer** implemented as a single `viewer.html` file.
 
 ## Run (recommended)
 
@@ -11,7 +11,7 @@ cd "G:\Meine Ablage\FAU\MRzero_group_folder\22_niivue"
 python -u -m http.server 8000
 ```
 
-Then open `http://localhost:8000` in your browser.
+Then open `http://localhost:8000` (no-field lab) or `http://localhost:8000/viewer.html` (minimal viewer) in your browser.
 
 ## Use
 
