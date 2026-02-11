@@ -126,9 +126,12 @@ export class NiivueModule {
 
     this.containerViewer.classList.add('niivue-app');
     this.containerViewer.innerHTML = `
-      <div class="viewer standalone-viewer">
+      <div class="viewer standalone-viewer" style="position: relative;">
         <canvas id="${this.canvasId}"></canvas>
         <div class="status" id="statusOverlay-${this.instanceId}">idle</div>
+        <div class="viewer-hint" style="position: absolute; bottom: 8px; right: 8px; font-size: 11px; color: #666; pointer-events: none;">
+          CTRL + mouse to change FoV
+        </div>
       </div>
     `;
 
@@ -185,6 +188,11 @@ export class NiivueModule {
       const buttons = this.containerControls.querySelectorAll('.tab-btn');
       const panes = this.containerControls.querySelectorAll('.tab-pane');
       const tabsContent = this.containerControls.querySelector('.tabs-content');
+      const viewerBtn = this.containerControls.querySelector('.tab-btn[data-tab="source"]');
+      if (viewerBtn) {
+        if (!viewerBtn.dataset.fullLabel) viewerBtn.dataset.fullLabel = viewerBtn.textContent || 'VIEWER';
+        if (!viewerBtn.dataset.collapsedLabel) viewerBtn.dataset.collapsedLabel = 'V';
+      }
       buttons.forEach(btn => {
         btn.onclick = () => {
           if (window.viewManager && window.viewManager.currentMode !== 'planning') {
@@ -196,14 +204,23 @@ export class NiivueModule {
           const wasActive = btn.classList.contains('active');
           const isSource = btn.dataset.tab === 'source';
           if (wasActive && isSource) {
+            const willCollapse = !(slotSidebar && slotSidebar.classList.contains('sidebar-collapsed'));
             if (tabsContent) tabsContent.classList.toggle('panel-collapsed');
             if (slotSidebar) slotSidebar.classList.toggle('sidebar-collapsed');
             if (labGrid) labGrid.classList.toggle('sidebar-collapsed');
+            if (viewerBtn) {
+              viewerBtn.textContent = willCollapse
+                ? (viewerBtn.dataset.collapsedLabel || 'V')
+                : (viewerBtn.dataset.fullLabel || 'VIEWER');
+            }
             return;
           }
           if (tabsContent) tabsContent.classList.remove('panel-collapsed');
           if (slotSidebar) slotSidebar.classList.remove('sidebar-collapsed');
           if (labGrid) labGrid.classList.remove('sidebar-collapsed');
+          if (viewerBtn) {
+            viewerBtn.textContent = viewerBtn.dataset.fullLabel || 'VIEWER';
+          }
           buttons.forEach(b => b.classList.remove('active'));
           panes.forEach(p => p.classList.remove('active'));
           btn.classList.add('active');
