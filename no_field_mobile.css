@@ -4,6 +4,20 @@
    ============================================ */
 
 @media (max-width: 768px) {
+    /* Sidebar: 20% narrower on mobile */
+    .lab-grid {
+        --sidebar-width: 200px;
+        grid-template-columns: 200px 1fr;
+    }
+    .lab-grid.sidebar-collapsed {
+        grid-template-columns: 24px 1fr;
+    }
+
+    /* Hide scan preview when sidebar is expanded (give full width to main viewer) */
+    .lab-grid:not(.sidebar-collapsed) #nv-scan-preview-container {
+        display: none !important;
+    }
+
     /* Footer: horizontal scroll-snap, one card per column */
     #slot-footer {
         display: flex;
@@ -15,6 +29,33 @@
         -webkit-overflow-scrolling: touch;
         gap: 1px;
         background: var(--bg-elevated);
+        position: relative;
+        padding-top: 28px;
+    }
+    #slot-footer .footer-card-dots {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 28px;
+        z-index: 1;
+        pointer-events: none;
+    }
+    #slot-footer .footer-card-dots .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--muted);
+        opacity: 0.4;
+        transition: opacity 0.2s, background 0.2s;
+    }
+    #slot-footer .footer-card-dots .dot.active {
+        opacity: 1;
+        background: var(--accent);
     }
 
     /* Each footer column is a full-width card */
