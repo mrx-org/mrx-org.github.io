@@ -223,6 +223,7 @@ export class SequenceExplorer {
             colParams.dataset.collapseBound = '1';
             colParams.style.cursor = 'pointer';
             colParams.addEventListener('click', (e) => {
+                if (window.matchMedia('(max-width: 768px)').matches) return;
                 const isCollapsed = footer.classList.contains('params-collapsed');
                 // Normalize target for mobile (text nodes etc.)
                 const targetEl = e.target instanceof Element ? e.target : e.target?.parentElement;
@@ -1408,6 +1409,7 @@ json.dumps(functions)
             colTree.dataset.collapseBound = '1';
             colTree.style.cursor = 'pointer';
             colTree.addEventListener('click', (e) => {
+                if (window.matchMedia('(max-width: 768px)').matches) return;
                 const isCollapsed = footer.classList.contains('tree-collapsed');
                 // Normalize target for mobile (text nodes etc.)
                 const targetEl = e.target instanceof Element ? e.target : e.target?.parentElement;
