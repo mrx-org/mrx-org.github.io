@@ -296,6 +296,7 @@
                 this.scan = scanModule;
                 this.preview = scanPreview;
                 this.currentMode = null;
+                this.maximizedViewer = null; // null = both visible, 'nvViewer' or 'nvScanPreview' = maximized
                 this.slots = {
                     sidebar: document.getElementById('slot-sidebar'),
                     main: document.getElementById('slot-main'),
@@ -312,6 +313,66 @@
                     seqPlot: document.getElementById('seq-plot-container'),
                     scanModule: document.getElementById('scan-module-container')
                 };
+                
+                // Listen for toggle maximize events
+                eventHub.on('toggleViewerMaximize', ({ containerId }) => {
+                    this.toggleViewerMaximize(containerId);
+                });
+            }
+            
+            toggleViewerMaximize(containerId) {
+                if (this.currentMode !== 'planning') return;
+                
+                // Determine which viewer was double-tapped
+                let tappedViewer = null;
+                if (containerId === 'nv-viewer-container') tappedViewer = 'nvViewer';
+                else if (containerId === 'nv-scan-preview-container') tappedViewer = 'nvScanPreview';
+                else return;
+                
+                // Toggle logic
+                if (this.maximizedViewer === tappedViewer) {
+                    // Already maximized - restore both
+                    this.maximizedViewer = null;
+                } else {
+                    // Maximize the tapped viewer
+                    this.maximizedViewer = tappedViewer;
+                }
+                
+                // Apply the layout
+                this.applyViewerLayout();
+            }
+            
+            applyViewerLayout() {
+                const viewer = this.cache.nvViewer;
+                const preview = this.cache.nvScanPreview;
+                
+                if (this.maximizedViewer === 'nvViewer') {
+                    viewer.style.flex = '1';
+                    viewer.style.display = '';
+                    preview.style.display = 'none';
+                } else if (this.maximizedViewer === 'nvScanPreview') {
+                    preview.style.flex = '1';
+                    preview.style.display = '';
+                    preview.style.borderLeft = 'none';
+                    viewer.style.display = 'none';
+                } else {
+                    // Both visible
+                    viewer.style.flex = '1';
+                    viewer.style.display = '';
+                    preview.style.flex = '1';
+                    preview.style.display = '';
+                    preview.style.borderLeft = '1px solid var(--border)';
+                }
+                
+                // Trigger resize for Niivue
+                setTimeout(() => {
+                    if (this.nv?.nv && viewer.style.display !== 'none') {
+                        this.nv.nv.resizeListener();
+                    }
+                    if (this.preview?.nv && preview.style.display !== 'none') {
+                        this.preview.nv.resizeListener();
+                    }
+                }, 50);
             }
 
             moveToSlot(moduleName, slotName) {
@@ -343,13 +404,16 @@
                     // Side-by-side layout: main viewer (50%) + scan preview (50%)
                     this.slots.main.style.display = 'flex';
                     this.slots.main.style.flexDirection = 'row';
-                    this.cache.nvViewer.style.flex = '1';
-                    this.cache.nvScanPreview.style.flex = '1';
-                    this.cache.nvScanPreview.style.borderLeft = '1px solid var(--border)';
+                    this.cache.nvViewer.style.display = '';
+                    this.cache.nvScanPreview.style.display = '';
                     this.moveToSlot('nvViewer', 'main');
                     this.moveToSlot('nvScanPreview', 'main');
                     this.slots.main.classList.remove('scrollable');
+                    // Apply current maximize state (or default to both visible)
+                    this.applyViewerLayout();
                 } else if (mode === 'sequence') {
+                    // Reset maximize state when leaving planning mode
+                    this.maximizedViewer = null;
                     // Full width for sequence plot
                     this.slots.main.style.display = '';
                     this.slots.main.style.flexDirection = '';

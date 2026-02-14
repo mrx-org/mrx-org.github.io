@@ -696,6 +696,26 @@ export class NiivueModule {
         }
     });
 
+    // Double-click to toggle maximize canvas
+    this.canvas.addEventListener("dblclick", () => {
+        this.toggleMaximize();
+    });
+    
+    // Double-tap detection for touch
+    let lastTapTime = 0;
+    this.canvas.addEventListener("touchend", (e) => {
+        if (e.touches.length === 0 && e.changedTouches.length === 1) {
+            const now = Date.now();
+            if (now - lastTapTime < 300 && now - lastTapTime > 50) {
+                // Double tap detected - but only if we weren't dragging
+                if (!this.isDraggingFov && !this.isTwoFingerRotating) {
+                    this.toggleMaximize();
+                }
+            }
+            lastTapTime = now;
+        }
+    });
+
     setInterval(() => this.updateAngles(), 200);
     this.setStatus("ready");
     this.isInitialized = true;
@@ -713,6 +733,11 @@ export class NiivueModule {
         showCrosshair: this.showCrosshair.checked
       });
     }
+  }
+
+  /** Toggle maximize this viewer (hide the other viewer) */
+  toggleMaximize() {
+    eventHub.emit('toggleViewerMaximize', { containerId: this.containerViewer?.id });
   }
 
   async initPyodide() {
@@ -2118,6 +2143,23 @@ export class ScanPreviewModule {
       
       eventHub.on('viewOptionsChange', (opts) => this.applyViewOptions(opts));
       
+      // Double-click to toggle maximize canvas
+      this.canvas.addEventListener("dblclick", () => {
+        this.toggleMaximize();
+      });
+      
+      // Double-tap detection for touch
+      let lastTapTime = 0;
+      this.canvas.addEventListener("touchend", (e) => {
+        if (e.touches.length === 0 && e.changedTouches.length === 1) {
+          const now = Date.now();
+          if (now - lastTapTime < 300 && now - lastTapTime > 50) {
+            this.toggleMaximize();
+          }
+          lastTapTime = now;
+        }
+      });
+      
       this.nv.drawScene();
       
       this.isInitialized = true;
@@ -2127,6 +2169,11 @@ export class ScanPreviewModule {
     } catch (e) {
       console.error("ScanPreviewModule init failed:", e);
     }
+  }
+  
+  /** Toggle maximize this viewer (hide the other viewer) */
+  toggleMaximize() {
+    eventHub.emit('toggleViewerMaximize', { containerId: this.container?.id });
   }
 
   triggerHighlight() {
