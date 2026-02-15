@@ -41,6 +41,8 @@ export class NiivueModule {
     this.touchPendingFovDrag = false;
     this.touchStartX = 0;
     this.touchStartY = 0;
+    this.twoFingerReleaseTime = 0;
+    this.TWO_FINGER_COOLDOWN_MS = 300;
 
     // Elements (will be set in render methods)
     this.containerViewer = null;
@@ -603,12 +605,17 @@ export class NiivueModule {
         
         if (e.touches.length === 1) {
             // Single finger: wait for movement before starting FOV drag so double-tap can be detected
-            const touch = e.touches[0];
-            this.touchPendingFovDrag = true;
-            this.touchStartX = touch.clientX;
-            this.touchStartY = touch.clientY;
+            // Skip if we're in cooldown after a two-finger release (avoids leftover finger triggering drag)
+            const inCooldown = (Date.now() - this.twoFingerReleaseTime) < this.TWO_FINGER_COOLDOWN_MS;
+            if (!inCooldown) {
+                const touch = e.touches[0];
+                this.touchPendingFovDrag = true;
+                this.touchStartX = touch.clientX;
+                this.touchStartY = touch.clientY;
+            }
         } else if (e.touches.length === 2) {
-            // Two fingers = FOV rotation
+            // Two fingers = FOV rotation; clear single-finger state so leftover finger doesn't start drag
+            this.touchPendingFovDrag = false;
             e.preventDefault();
             if (window.viewManager && window.viewManager.currentMode !== 'planning') {
                 window.viewManager.setMode('planning');
@@ -642,7 +649,8 @@ export class NiivueModule {
     window.addEventListener("touchmove", (e) => {
         if (!this.showFov?.checked) return;
         
-        if (this.touchPendingFovDrag && e.touches.length === 1) {
+        const inCooldown = (Date.now() - this.twoFingerReleaseTime) < this.TWO_FINGER_COOLDOWN_MS;
+        if (this.touchPendingFovDrag && e.touches.length === 1 && !inCooldown) {
             const touch = e.touches[0];
             const dx = touch.clientX - this.touchStartX;
             const dy = touch.clientY - this.touchStartY;
@@ -713,6 +721,7 @@ export class NiivueModule {
             this.isTwoFingerRotating = false;
             this.isRotatingFov = false;
             this.nv.opts.dragMode = this.savedDragMode;
+            this.twoFingerReleaseTime = Date.now();
             this.setStatus("FOV Rotate finished");
             this.syncFovLabels();
         }
@@ -728,7 +737,8 @@ export class NiivueModule {
     this.canvas.addEventListener("touchend", (e) => {
         if (e.touches.length === 0 && e.changedTouches.length === 1) {
             const now = Date.now();
-            if (this.touchPendingFovDrag) {
+            const inCooldown = (now - this.twoFingerReleaseTime) < this.TWO_FINGER_COOLDOWN_MS;
+            if (this.touchPendingFovDrag && !inCooldown) {
                 if (now - lastTapTime < 300 && now - lastTapTime > 50 && !this.isTwoFingerRotating) {
                     this.toggleMaximize();
                 }
