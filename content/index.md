@@ -1,8 +1,12 @@
 ---
 title: Welcome to MRX
 ---
+
 You can find our first application here: [**No-field Scanner**](https://mrx-org.github.io/nofield/)
 
+> [!info] Work in Progress 🚧
+> This documentation is currently under construction and partially severely outdated.
+> An up-to-date list of current projects can be found in [[overview]].
 
 ---
 

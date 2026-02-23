@@ -1,1 +1,0 @@
-This documentation is currently a copy of the old mrx-book. It is outdated and needs a proper revision / restructuring etc.

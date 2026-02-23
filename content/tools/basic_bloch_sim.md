@@ -1,3 +1,6 @@
+
+> [!warning] Outdated
+> This tool existed in [mrx-org/mrx](https://github.com/mrx-org/mrx) but is not ported to the current iteration of tools. If that is done, this documentation needs to be updated.
 # Basic Bloch simulation
 
 ```bash
