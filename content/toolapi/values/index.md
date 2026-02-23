@@ -1,4 +1,6 @@
-# Value types
+---
+title: Value types
+---
 
 USI needs to exchange data between the [Host](../tool_host.md#host) and the [Tool](../tool_host.md#tool).
 Namely, upon calling the tool, the host will send a bunch of inputs.

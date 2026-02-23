@@ -1,3 +1,6 @@
+> [!todo] Remove
+> Delete this file as soon as the descriptions in [[tools/index|index]] and [[implementations]] are done.
+
 # Tool
 
 A tool is a standalone program, which can be executed from the command line.
