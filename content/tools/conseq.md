@@ -1,18 +1,18 @@
 ---
-title: Sequence Loader
+title: Sequence Converter
 ---
 
 > [!summary]
 > Load a sequence from a pulseq .seq file.
 
 > [!info] Work In Progress 🚧
-> This tool will be renamed into `trajex` and will have added support for pulseq 1.5.0 and `toolapi::BlockSeq`
+> This tool currently can only convert .seq file contents into `List[InstantSeqEvent]`. In the future it will be extended to support newer pulseq standards, other formats, emitting `List[SeqBlock]`.
 
 ### Demo and Tool URL
 
-https://tool-seqloader-flyio.fly.dev/
+https://tool-conseq.fly.dev/
 ```url
-wss://tool-seqloader-flyio.fly.dev/tool
+wss://tool-conseq.fly.dev/tool
 ```
 
 ### Inputs

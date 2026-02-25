@@ -5,6 +5,9 @@ title: Phantom Library
 > [!summary]
 > Load one of the BrainWeb phantoms: any FOV (arbitrary rotation) at any resolution.
 
+> [!info] Work In Progress 🚧
+> The name of this tool might still change. Still missing: returning combined phantoms, support for non-BrainWeb data, more (and maybe freely selectable) field strengths, better reslicing.
+
 ### Demo and Tool URL
 https://tool-phantomlib-flyio.fly.dev/ 
 ```url

@@ -7,7 +7,7 @@ Tools are called using `toolapi::call`. Look at its documentation for details; v
 # [`tool-phantomlib`](phantomlib)
 Provides easy loading of phantoms: any slice, any orientation, any resolution. Specify an affine matrix (rotation + translation), a resolution and a phantom ID in order to quickly load a segmented or voxel grid phantom. This tool eliminates the need to ship apps with example data by providing a database of quantified phantoms.
 
-# [`tool-seqloader`](seqloader)
+# [`tool-conseq`](conseq)
 Currently a very basic tool which converts a Pulseq .seq file (contents passed as string) into a ToolAPI sequence, ready to be simulated by the simulation tool.
 
 # [`tool-spdg`](spdg)

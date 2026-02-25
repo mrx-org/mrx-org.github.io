@@ -1,3 +1,6 @@
+> [!info] Work In Progress 🚧
+> This tool will be renamed into `trajex` and will get extended support for $T_1$ / $T_2$ weighting analysis, non-ADC trajectory samples, multi-state trajectories...
+
 # k-Space extraction
 
 ```bash
