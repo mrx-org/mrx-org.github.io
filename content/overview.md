@@ -25,8 +25,7 @@ These projects help development and presentation of MRX apps.
 | [toolapi · crates.io](https://crates.io/crates/toolapi)          | Rust implementation of the [MRX ToolAPI](toolapi/index).                                                                          | [toolapi](https://github.com/mrx-org/toolapi)                     |
 | [toolapi · PyPI](https://pypi.org/project/toolapi/)              | Python implementation of the [MRX ToolAPI](toolapi/index).                                                                        | [toolapi-py](https://github.com/mrx-org/toolapi-py)               |
 | [toolapi-wasm · npm](https://www.npmjs.com/package/toolapi-wasm) | JavaScript / WASM implementation of the [MRX ToolAPI](toolapi/index). Currently client-only as WASM tool servers are not planned. | [toolapi-wasm](https://github.com/mrx-org/toolapi-wasm)           |
-| GitHub org profile                                               | Special repository that contains the mrx-org readme (in `profile/README.md`)                                                      | [.github](https://github.com/mrx-org/.github)                     |
-| Organization                                                     | `private`                                                                                                                         | [mrx-board](https://github.com/mrx-org/mrx-board)                 |
+| _organization_                                                   | `private`                                                                                                                         | [mrx-board](https://github.com/mrx-org/mrx-board)                 |
 
 # Tools
 
