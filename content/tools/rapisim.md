@@ -1,14 +1,16 @@
 ---
-title: sPDG Simulation
+title: Rapid MRI Simulation
 ---
 
 > [!summary]
 > State-of-the art MRI simulation, subject to continuous improvement.
 
 ### Demo and Tool URL
-https://tool-spdg-flyio.fly.dev/ 
+
+https://tool-rapisim.fly.dev/
+
 ```url
-wss://tool-spdg-flyio.dev/tool
+wss://tool-rapisim.fly.dev/tool
 ```
 
 ### Inputs
@@ -20,4 +22,4 @@ wss://tool-spdg-flyio.dev/tool
 
 ### Output
 
-A `toolapi::SegmentedPhantom` containing gray matter, white matter, csf, fat and vessels.
+A `List[Complex]` containing the simulated signal.

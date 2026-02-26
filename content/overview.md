@@ -1,6 +1,7 @@
 ---
 title: Development overview
 ---
+
 This page is a list of all repositories that were created to achieve the goals of MRX.
 It is meant as an overview and to keep track of our efforts so far.
 All repositories are hosted in the [mrx-org](https://github.com/mrx-org/) GitHub organization.
@@ -35,12 +36,13 @@ Building blocks for MRX apps. These tools are built using the [MRX ToolAPI](tool
 | --------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | [Phantom Library](https://tool-phantomlib-flyio.fly.dev/) | Retrieve a segmented BrainWeb phantom at any resolution and FOV.                          | [tool_phantomlib_flyio](https://github.com/mrx-org/tool_phantomlib_flyio) |
 | [Sequence Loader](https://tool-conseq.fly.dev/)           | Load a Pulseq .seq file into a ToolAPI sequence.                                          | [tool-conseq](https://github.com/mrx-org/tool-conseq)                     |
-| [Simulation](https://tool-spdg-flyio.fly.dev/)            | Simulate the signal of an MRI sequence from a phantom (loaded with the respective tools). | [tool_spdg_flyio](https://github.com/mrx-org/tool_spdg_flyio)             |
+| [Simulation](https://tool-rapisim.fly.dev/)               | Simulate the signal of an MRI sequence from a phantom (loaded with the respective tools). | [tool-rapisim](https://github.com/mrx-org/tool-rapisim)                   |
 | [Trajectory Extractor](https://tool-trajex.fly.dev/)      | Highly accurate k-space trajectory (encoding) extractor using a PDG simulation.           | [tool-trajex](https://github.com/mrx-org/tool-trajex)                     |
 
 # Outdated
 
 There is one outdated repository: [mrx-org/mrx](https://github.com/mrx-org/mrx). This was a monorepo for the first iteration. It contains an outdated version / prototype of the toolapi, as well as a couple of tools. Some of them should be extracted into their own tool repos:
+
 - [ ] `tool_basic_bloch_sim`: A purposefully simple isochromat simulation, useful a ground-truth
 - [x] `tool_kspace_extract`: Automatic k-space trajectory extraction, to be replaced with new `trajex` tool
 - [ ] `tool_mr0sim`: Provides MR-zero PDG simulation as MRX tool (first toolapi-py server impl)
