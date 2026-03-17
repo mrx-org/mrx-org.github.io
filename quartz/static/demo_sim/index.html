@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MRX Tool Demo</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <div class="container">
+    <div class="card card-title">
+      <h1 class="highlight" id="pageTitle">RAPISIM</h1>
+      <p>Cutting edge MRI signal computation using PDG with smart filters (WIP)</p>
+      <div class="tags" id="tagsRapisim">
+        <span class="tag">Language: <a href="https://rust-lang.org/">Rust</a></span>
+        <span class="tag">Machines: <a href="https://fly.io/docs/about/pricing/#started-fly-machines">4x shared-cpu-8x@16384MB</a></span>
+        <span class="tag">Regions: <a href="https://fly.io/docs/reference/regions/">fra</a></span>
+        <span class="tag">Dashboard: <a href="https://fly.io/apps/tool-rapisim">fly.io/apps/tool-rapisim</a></span>
+      </div>
+      <div class="tags" id="tagsMr0sim" style="display:none">
+        <span class="tag">Language: <a href="https://python.org/">Python</a></span>
+        <span class="tag">Machines: <a href="https://fly.io/docs/about/pricing/#started-fly-machines">2x shared-cpu-2x@4096MB</a></span>
+        <span class="tag">Regions: <a href="https://fly.io/docs/reference/regions/">fra</a></span>
+        <span class="tag">Dashboard: <a href="https://fly.io/apps/tool-mr0sim">fly.io/apps/tool-mr0sim</a></span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>SELECT INPUT</h2>
+      <div class="card-actions">
+        <input type="file" id="seqFile" accept=".seq" hidden>
+        <div class="btn-well"><button class="btn" onclick="document.getElementById('seqFile').click()">Select .seq
+            file</button></div>
+        <div class="btn-well"><button class="btn" id="btnView" disabled>View</button></div>
+        <span class="file-label" id="fileLabel">no file selected</span>
+        <div class="spacer"></div>
+        <div class="btn-well toggle-well">
+          <button class="btn toggle" id="toggleSim" type="button">
+            <span class="toggle-knob"></span>
+          </button>
+        </div>
+        <span class="toggle-label" id="toggleLabel">mr0sim</span>
+        <div class="btn-well"><button class="btn btn-accent" id="btnRun" disabled>Run pipeline</button></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>PIPELINE</h2>
+      <div class="pipeline-grid">
+        <div class="inset-card pipeline-card" data-tool="conseq">
+          <div class="pipeline-card-header">
+            <h3>CONSEQ</h3>
+            <span class="timing" id="timing-conseq">0.0 s</span>
+          </div>
+          <pre class="console" id="console-conseq"></pre>
+        </div>
+        <div class="inset-card pipeline-card" data-tool="phantomlib">
+          <div class="pipeline-card-header">
+            <h3>PHANTOMLIB</h3>
+            <span class="timing" id="timing-phantomlib">0.0 s</span>
+          </div>
+          <pre class="console" id="console-phantomlib"></pre>
+        </div>
+        <div class="inset-card pipeline-card" data-tool="simtool">
+          <div class="pipeline-card-header">
+            <h3 id="simToolTitle">RAPISIM</h3>
+            <span class="timing" id="timing-simtool">0.0 s</span>
+          </div>
+          <pre class="console" id="console-simtool"></pre>
+        </div>
+        <div class="inset-card pipeline-card" data-tool="trajex">
+          <div class="pipeline-card-header">
+            <h3>TRAJEX</h3>
+            <span class="timing" id="timing-trajex">0.0 s</span>
+          </div>
+          <pre class="console" id="console-trajex"></pre>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>OUTPUT</h2>
+      <div id="outputContent">
+        <div class="inset-card placeholder-box"><h3>RUN PIPELINE FIRST</h3></div>
+      </div>
+    </div>
+  </div>
+  <div class="viewer-overlay" id="viewerOverlay">
+    <div class="viewer-pane card">
+      <div class="viewer-header">
+        <div class="viewer-header-left">
+          <h2>VIEWER</h2>
+          <span class="viewer-subtitle" id="viewerSubtitle"></span>
+        </div>
+        <div class="btn-well viewer-btn-well"><button class="btn viewer-btn" id="viewerClose"></button></div>
+      </div>
+      <pre class="console viewer-console" id="viewerContent"></pre>
+    </div>
+  </div>
+  <script src="visuals.js"></script>
+  <script type="module" src="pipeline.js"></script>
+</body>
+
+</html>
