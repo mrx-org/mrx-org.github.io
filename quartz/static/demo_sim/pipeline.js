@@ -7,7 +7,14 @@ var CONSEQ_ADDR = 'wss://tool-conseq.fly.dev/tool';
 var PHANTOMLIB_ADDR = 'wss://tool-phantomlib-flyio.fly.dev/tool';
 var MR0SIM_ADDR = 'wss://tool-mr0sim.fly.dev/tool';
 var RAPISIM_ADDR = 'wss://tool-rapisim.fly.dev/tool';
+var SPINSIM_ADDR = 'wss://tool-spinsim.fly.dev/tool';
 var TRAJEX_ADDR = 'wss://tool-trajex.fly.dev/tool';
+
+var SIM_ADDRS = {
+  rapisim: RAPISIM_ADDR,
+  mr0sim: MR0SIM_ADDR,
+  spinsim: SPINSIM_ADDR
+};
 
 // --- Phantom parameters (same as index.html) ---
 
@@ -120,10 +127,11 @@ async function runPipeline() {
     // ---- Phase 2: simtool + trajex in parallel ----
 
     var [simResult, trajexResult] = await Promise.all([
-      runTool('simtool', window.useRapisim ? RAPISIM_ADDR : MR0SIM_ADDR, {
+      runTool('simtool', SIM_ADDRS[window.simTool] || RAPISIM_ADDR, {
         Dict: {
           sequence: { TypedList: { InstantSeqEvent: events } },
-          phantom: phantomResult
+          phantom: phantomResult,
+          spins_per_voxel: { Int: 10 }
         }
       }),
       runTool('trajex', TRAJEX_ADDR, {

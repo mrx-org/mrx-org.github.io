@@ -133,30 +133,33 @@ document.getElementById('seqFile').addEventListener('change', function () {
   }
 });
 
-// --- Simulator toggle ---
+// --- Simulator selector ---
 
-window.useRapisim = true;
-var toggleBtn = document.getElementById('toggleSim');
-var toggleLabel = document.getElementById('toggleLabel');
+var SIM_TOOLS = {
+  rapisim: { title: 'RAPISIM', tagsId: 'tagsRapisim' },
+  mr0sim:  { title: 'MR0SIM',  tagsId: 'tagsMr0sim' },
+  spinsim: { title: 'SPINSIM', tagsId: 'tagsSpinsim' }
+};
+
+window.simTool = 'rapisim';
+var simSelect = document.getElementById('simSelect');
 var pageTitle = document.getElementById('pageTitle');
 var simToolTitle = document.getElementById('simToolTitle');
-var tagsRapisim = document.getElementById('tagsRapisim');
-var tagsMr0sim = document.getElementById('tagsMr0sim');
 
-function updateSimToggle() {
-  toggleBtn.classList.toggle('active', window.useRapisim);
-  toggleLabel.classList.toggle('active', window.useRapisim);
-  toggleLabel.textContent = window.useRapisim ? 'RAPISIM \u26A1' : 'MR0SIM';
-  pageTitle.textContent = window.useRapisim ? 'RAPISIM' : 'MR0SIM';
-  simToolTitle.textContent = window.useRapisim ? 'RAPISIM' : 'MR0SIM';
-  tagsRapisim.style.display = window.useRapisim ? '' : 'none';
-  tagsMr0sim.style.display = window.useRapisim ? 'none' : '';
+function updateSimSelection() {
+  var info = SIM_TOOLS[window.simTool];
+  pageTitle.textContent = info.title;
+  simToolTitle.textContent = info.title;
+  for (var key in SIM_TOOLS) {
+    var el = document.getElementById(SIM_TOOLS[key].tagsId);
+    if (el) el.style.display = key === window.simTool ? '' : 'none';
+  }
 }
-updateSimToggle();
+updateSimSelection();
 
-toggleBtn.addEventListener('click', function () {
-  window.useRapisim = !window.useRapisim;
-  updateSimToggle();
+simSelect.addEventListener('change', function () {
+  window.simTool = simSelect.value;
+  updateSimSelection();
 });
 
 // --- Button handlers ---

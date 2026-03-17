@@ -25,6 +25,10 @@
         <span class="tag">Regions: <a href="https://fly.io/docs/reference/regions/">fra</a></span>
         <span class="tag">Dashboard: <a href="https://fly.io/apps/tool-mr0sim">fly.io/apps/tool-mr0sim</a></span>
       </div>
+      <div class="tags" id="tagsSpinsim" style="display:none">
+        <span class="tag">Language: <a href="https://python.org/">Python</a></span>
+        <span class="tag">Dashboard: <a href="https://fly.io/apps/tool-spinsim">fly.io/apps/tool-spinsim</a></span>
+      </div>
     </div>
     <div class="card">
       <h2>SELECT INPUT</h2>
@@ -35,12 +39,13 @@
         <div class="btn-well"><button class="btn" id="btnView" disabled>View</button></div>
         <span class="file-label" id="fileLabel">no file selected</span>
         <div class="spacer"></div>
-        <div class="btn-well toggle-well">
-          <button class="btn toggle" id="toggleSim" type="button">
-            <span class="toggle-knob"></span>
-          </button>
+        <div class="btn-well select-well">
+          <select class="btn sim-select" id="simSelect">
+            <option value="rapisim">RAPISIM</option>
+            <option value="mr0sim">MR0SIM</option>
+            <option value="spinsim">SPINSIM</option>
+          </select>
         </div>
-        <span class="toggle-label" id="toggleLabel">mr0sim</span>
         <div class="btn-well"><button class="btn btn-accent" id="btnRun" disabled>Run pipeline</button></div>
       </div>
     </div>
