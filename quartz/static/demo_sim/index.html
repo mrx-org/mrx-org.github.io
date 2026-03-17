@@ -26,7 +26,9 @@
         <span class="tag">Dashboard: <a href="https://fly.io/apps/tool-mr0sim">fly.io/apps/tool-mr0sim</a></span>
       </div>
       <div class="tags" id="tagsSpinsim" style="display:none">
-        <span class="tag">Language: <a href="https://python.org/">Python</a></span>
+        <span class="tag">Language: <a href="https://rust-lang.org/">Rust</a></span>
+        <span class="tag">Machines: <a href="https://fly.io/docs/about/pricing/#started-fly-machines">2x shared-cpu-2x@4096MB</a></span>
+        <span class="tag">Regions: <a href="https://fly.io/docs/reference/regions/">fra</a></span>
         <span class="tag">Dashboard: <a href="https://fly.io/apps/tool-spinsim">fly.io/apps/tool-spinsim</a></span>
       </div>
     </div>
@@ -39,6 +41,10 @@
         <div class="btn-well"><button class="btn" id="btnView" disabled>View</button></div>
         <span class="file-label" id="fileLabel">no file selected</span>
         <div class="spacer"></div>
+        <div class="spins-well" id="spinsWell" style="display:none">
+          <input class="spins-input" id="spinsInput" type="number" min="1" max="1000" value="10" title="spins per voxel">
+          <span class="spins-label">spins</span>
+        </div>
         <div class="btn-well select-well">
           <select class="btn sim-select" id="simSelect">
             <option value="rapisim">RAPISIM</option>

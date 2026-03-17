@@ -150,6 +150,42 @@ body {
   color: var(--text);
 }
 
+.spins-well {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.5rem;
+  background: var(--bg-color);
+  box-shadow:
+    inset 1px 1px 2px var(--shadow-dark),
+    inset -1px -1px 2px var(--shadow-light);
+}
+
+.spins-input {
+  width: 3rem;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 0.8rem;
+  font-family: inherit;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+
+.spins-input::-webkit-outer-spin-button,
+.spins-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.spins-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 .tags {
   display: flex;
   flex-wrap: wrap;

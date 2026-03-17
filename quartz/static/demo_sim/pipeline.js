@@ -126,12 +126,14 @@ async function runPipeline() {
 
     // ---- Phase 2: simtool + trajex in parallel ----
 
+    var spinsPerVoxel = parseInt(document.getElementById('spinsInput').value, 10) || 10;
+
     var [simResult, trajexResult] = await Promise.all([
       runTool('simtool', SIM_ADDRS[window.simTool] || RAPISIM_ADDR, {
         Dict: {
           sequence: { TypedList: { InstantSeqEvent: events } },
           phantom: phantomResult,
-          spins_per_voxel: { Int: 10 }
+          spins_per_voxel: { Int: spinsPerVoxel }
         }
       }),
       runTool('trajex', TRAJEX_ADDR, {

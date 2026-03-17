@@ -145,6 +145,7 @@ window.simTool = 'rapisim';
 var simSelect = document.getElementById('simSelect');
 var pageTitle = document.getElementById('pageTitle');
 var simToolTitle = document.getElementById('simToolTitle');
+var spinsWell = document.getElementById('spinsWell');
 
 function updateSimSelection() {
   var info = SIM_TOOLS[window.simTool];
@@ -154,6 +155,7 @@ function updateSimSelection() {
     var el = document.getElementById(SIM_TOOLS[key].tagsId);
     if (el) el.style.display = key === window.simTool ? '' : 'none';
   }
+  spinsWell.style.display = window.simTool === 'spinsim' ? '' : 'none';
 }
 updateSimSelection();
 
