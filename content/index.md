@@ -4,6 +4,8 @@ title: Welcome to MRX
 
 You can find our first application here: [**No-field Scanner**](https://mrx-org.github.io/nofield/)
 
+A web app comparing the currently available simulations is here: [**MRX Tool Demo**](https://mrx-org.github.io/static/demo_sim/)
+
 > [!info] Work in Progress 🚧
 > This documentation is currently under construction and partially severely outdated.
 > An up-to-date list of current projects can be found in [[overview]].
