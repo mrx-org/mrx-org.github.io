@@ -11,7 +11,7 @@ title: Phantom Library
 ### Demo and Tool URL
 https://tool-phantomlib-flyio.fly.dev/ 
 ```url
-wss://tool-phantomlib-flyio.dev/tool
+wss://tool-phantomlib-flyio.fly.dev/tool
 ```
 
 ### Inputs
