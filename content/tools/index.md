@@ -23,3 +23,7 @@ Takes a ToolAPI phantom and sequence as input and simulates an accurate MRI sign
 # [`tool-spinsim`](spinsim)
 
 A very basic isochromat simulation, programmed in Rust. Meant as ground-truth with as little space for bugs as possible; performance is not a priority.
+
+# [`tool-mr0sim`](mr0sim)
+
+Simulation from [MRzero-Core](https://github.com/MRsources/MRzero-Core) - tried and tested and fast. This simulation is often tested and compared to measurement and might be a better ground truth than [[spinsim]]; because of its reliance on Python and Torch the startup time of the server is quite slow.
