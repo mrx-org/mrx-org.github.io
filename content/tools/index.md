@@ -20,10 +20,6 @@ Automatic k-space trajectory extraction of arbitrary MRI sequences. Works by acc
 
 Takes a ToolAPI phantom and sequence as input and simulates an accurate MRI signal from it. Exact implementation is subject to change; aims to produce quantitative exact (and physically accurate) results which can be reconstructed with the same tools to deliver the same images as in-vivo measurements.
 
----
+# [`tool-spinsim`](spinsim)
 
-> [!warning] Outdated
-> The following tools existed in a prior version but are not yet ported to the current iteration of MRX.
-
-- [basic bloch sim](basic_bloch_sim.md): A simple isochromat-based simulator
-- [mr0 pdg sim](mr0_pdg_sim.md): The mr0 simulation, exposed as tool.
+A very basic isochromat simulation, programmed in Rust. Meant as ground-truth with as little space for bugs as possible; performance is not a priority.
