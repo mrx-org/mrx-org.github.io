@@ -8,7 +8,7 @@ A web app comparing the currently available simulations is here: [**MRX Tool Dem
 
 > [!info] Work in Progress 🚧
 > This documentation is currently under construction and partially severely outdated.
-> An up-to-date list of current projects can be found in [[overview]].
+> An up-to-date list of current projects can be found in [[repo_overview]].
 
 ---
 
