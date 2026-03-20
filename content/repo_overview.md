@@ -12,11 +12,11 @@ All repositories are hosted in the [mrx-org](https://github.com/mrx-org/) GitHub
 
 Language implementations of the [MRX ToolAPI](toolapi/index).
 
-| Project                                                                                                                                                                                                        | Description                                    |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| [![github](https://badgen.net/badge/icon/toolapi?icon=github&label)](https://github.com/mrx-org/toolapi) [![crates.io](https://badgen.net/crates/v/toolapi)](https://crates.io/crates/toolapi)                 | Rust implementation: `cargo add toolapi`       |
-| [![github](https://badgen.net/badge/icon/toolapi-py?icon=github&label)](https://github.com/mrx-org/toolapi-py) [![pypi](https://badgen.net/pypi/v/toolapi)](https://pypi.org/project/toolapi/)                 | Python wrapper: `pip install toolapi`          |
-| [![github](https://badgen.net/badge/icon/toolapi-wasm?icon=github&label)](https://github.com/mrx-org/toolapi-wasm) [![npm](https://badgen.net/npm/v/toolapi-wasm)](https://www.npmjs.com/package/toolapi-wasm) | JavaScript wrapper: `npm install toolapi-wasm` |
+| Project                                                                                                                                                                                              | Description                               |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| [![github](https://badgen.net/badge/icon/toolapi?icon=github&label)](https://github.com/mrx-org/toolapi) [![crates.io](https://badgen.net/crates/v/toolapi)](https://crates.io/crates/toolapi)       | Rust implementation: `cargo add toolapi`  |
+| [![github](https://badgen.net/badge/icon/toolapi-py?icon=github&label)](https://github.com/mrx-org/toolapi-py) [![pypi](https://badgen.net/pypi/v/toolapi)](https://pypi.org/project/toolapi/)       | Python wrapper: `pip install toolapi`     |
+| [![github](https://badgen.net/badge/icon/toolapi-wasm?icon=github&label)](https://github.com/mrx-org/toolapi-wasm) [![npm](https://badgen.net/npm/v/toolapi)](https://www.npmjs.com/package/toolapi) | JavaScript wrapper: `npm install toolapi` |
 
 # Organization
 
