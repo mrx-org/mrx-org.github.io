@@ -170,6 +170,65 @@ body {
   text-align: right;
 }
 
+/* Slice slider */
+.slice-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  margin-bottom: 0.8rem;
+}
+
+.slice-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.slice-slider {
+  flex: 1;
+  accent-color: var(--accent);
+  height: 4px;
+}
+
+.slice-value {
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  min-width: 3.5rem;
+  text-align: right;
+}
+
+/* Tissue image grid */
+.tissue-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 0.8rem;
+}
+
+.tissue-cell {
+  text-align: center;
+}
+
+.tissue-cell canvas {
+  display: block;
+  width: 100%;
+  image-rendering: pixelated;
+  border-radius: 0.3rem;
+}
+
+.tissue-cell-label {
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Shared inset card */
 .inset-card {
   border-radius: 0.75rem;

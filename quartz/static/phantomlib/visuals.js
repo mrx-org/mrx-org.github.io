@@ -151,23 +151,123 @@ function setPhantomTableError(msg) {
 
 // --- Output result ---
 
-var outputTitle = document.getElementById('resultTitle');
+var resultTitle = document.getElementById('resultTitle');
 var resultTable = document.getElementById('resultTable');
 var resultTableBody = document.getElementById('resultTableBody');
+var sliceControls = document.getElementById('sliceControls');
+var sliceSlider = document.getElementById('sliceSlider');
+var sliceValue = document.getElementById('sliceValue');
+var tissueImages = document.getElementById('tissueImages');
+
+// Stored phantom for re-rendering on slice change
+var currentPhantom = null;
+var currentTissueNames = null;
+var currentNx = 0, currentNy = 0, currentNz = 0;
+
+// --- Image helpers ---
+
+function extractSlice(data3d, nx, ny, nz, sliceZ) {
+  var slice = new Float64Array(nx * ny);
+  for (var x = 0; x < nx; x++) {
+    for (var y = 0; y < ny; y++) {
+      slice[x * ny + y] = data3d[x * ny * nz + y * nz + sliceZ];
+    }
+  }
+  return slice;
+}
+
+function generateImage(data, width, height) {
+  var min = Infinity, max = -Infinity;
+  for (var i = 0; i < data.length; i++) {
+    if (data[i] < min) min = data[i];
+    if (data[i] > max) max = data[i];
+  }
+  var range = max - min || 1;
+
+  var canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  var ctx = canvas.getContext('2d');
+  var imgData = ctx.createImageData(width, height);
+
+  for (var y = 0; y < height; y++) {
+    for (var x = 0; x < width; x++) {
+      var srcIdx = x * height + y;
+      var dstIdx = (x + (height - 1 - y) * width) * 4;
+      var v = Math.round(((data[srcIdx] - min) / range) * 255);
+      imgData.data[dstIdx] = v;
+      imgData.data[dstIdx + 1] = v;
+      imgData.data[dstIdx + 2] = v;
+      imgData.data[dstIdx + 3] = 255;
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+  return canvas;
+}
+
+function renderSlice(sliceZ) {
+  tissueImages.innerHTML = '';
+  var tissues = currentPhantom.tissues;
+
+  for (var i = 0; i < currentTissueNames.length; i++) {
+    var name = currentTissueNames[i];
+    var tissue = tissues.get(name);
+
+    // Render density and dB0
+    var props = [['density', 'density'], ['db0', 'dB0']];
+    for (var p = 0; p < props.length; p++) {
+      var prop = props[p][0];
+      var label = props[p][1];
+      var vol = tissue[prop];
+      var vNx = vol.shape[0], vNy = vol.shape[1], vNz = vol.shape[2];
+      var isConst = (vNx === 1 && vNy === 1 && vNz === 1);
+
+      var data;
+      if (isConst) {
+        data = new Float64Array(currentNx * currentNy).fill(vol.data.Float[0]);
+      } else {
+        data = extractSlice(vol.data.Float, vNx, vNy, vNz, Math.min(sliceZ, vNz - 1));
+      }
+
+      var canvas = generateImage(data, isConst ? currentNx : vNx, isConst ? currentNy : vNy);
+      var cell = document.createElement('div');
+      cell.className = 'tissue-cell';
+      cell.appendChild(canvas);
+
+      var labelEl = document.createElement('div');
+      labelEl.className = 'tissue-cell-label';
+      labelEl.textContent = name + ' ' + label;
+      cell.appendChild(labelEl);
+
+      tissueImages.appendChild(cell);
+    }
+  }
+}
+
+sliceSlider.addEventListener('input', function () {
+  var z = parseInt(sliceSlider.value);
+  sliceValue.textContent = z + ' / ' + (currentNz - 1);
+  renderSlice(z);
+});
+
+// --- Render result ---
 
 function renderResult(phantom) {
+  currentPhantom = phantom;
   var tissues = phantom.tissues;
-  var tissueNames = Array.from(tissues.keys());
+  currentTissueNames = Array.from(tissues.keys());
   var first = tissues.values().next().value;
-  var nx = first.density.shape[0];
-  var ny = first.density.shape[1];
-  var nz = first.density.shape[2];
+  currentNx = first.density.shape[0];
+  currentNy = first.density.shape[1];
+  currentNz = first.density.shape[2];
 
-  outputTitle.textContent = tissueNames.length + ' TISSUE(S), ' + nx + ' x ' + ny + ' x ' + nz;
+  resultTitle.textContent = currentTissueNames.length + ' TISSUE(S), ' + currentNx + ' x ' + currentNy + ' x ' + currentNz;
 
+  // Tissue properties table
   resultTableBody.innerHTML = '';
-  for (var i = 0; i < tissueNames.length; i++) {
-    var name = tissueNames[i];
+  for (var i = 0; i < currentTissueNames.length; i++) {
+    var name = currentTissueNames[i];
     var t = tissues.get(name);
     var tr = document.createElement('tr');
     var tdName = document.createElement('td');
@@ -182,12 +282,26 @@ function renderResult(phantom) {
     resultTableBody.appendChild(tr);
   }
   resultTable.style.display = '';
+
+  // Slice slider
+  var midZ = Math.floor(currentNz / 2);
+  sliceSlider.max = currentNz - 1;
+  sliceSlider.value = midZ;
+  sliceValue.textContent = midZ + ' / ' + (currentNz - 1);
+  sliceControls.style.display = '';
+
+  // Render initial slice
+  renderSlice(midZ);
 }
 
 function clearResult() {
-  outputTitle.textContent = 'NO DATA';
+  currentPhantom = null;
+  currentTissueNames = null;
+  resultTitle.textContent = 'RETRIEVE PHANTOM FIRST';
   resultTable.style.display = 'none';
   resultTableBody.innerHTML = '';
+  sliceControls.style.display = 'none';
+  tissueImages.innerHTML = '';
 }
 
 // --- Button handlers ---

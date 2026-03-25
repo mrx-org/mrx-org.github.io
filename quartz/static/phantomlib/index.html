@@ -36,7 +36,7 @@
             <tr><th>NAME</th><th>CREATED</th></tr>
           </thead>
           <tbody id="phantomTableBody">
-            <tr><td colspan="2" class="phantom-table-empty">click Refresh to load</td></tr>
+            <tr><td colspan="2" class="phantom-table-empty">click Refresh to load list of phantoms</td></tr>
           </tbody>
         </table>
       </div>
@@ -45,16 +45,24 @@
       <h2>RETRIEVAL</h2>
       <div class="card-actions">
         <div class="btn-well"><button class="btn btn-accent" id="btnRetrieve" disabled>Retrieve</button></div>
-        <span class="file-label" id="retrieveLabel">select a phantom first</span>
+        <span class="file-label" id="retrieveLabel">select a phantom from the list above</span>
       </div>
       <div class="inset-card result-wrap" id="resultContent">
-        <h3 id="resultTitle">NO DATA</h3>
+        <h3 id="resultTitle">RETRIEVE PHANTOM FIRST</h3>
         <table class="phantom-table result-table" id="resultTable" style="display:none">
           <thead>
             <tr><th>TISSUE</th><th>ADC</th><th>T1</th><th>T2</th><th>T2'</th></tr>
           </thead>
           <tbody id="resultTableBody"></tbody>
         </table>
+        <div id="sliceControls" style="display:none">
+          <div class="slice-slider-row">
+            <span class="slice-label">SLICE Z</span>
+            <input type="range" class="slice-slider" id="sliceSlider" min="0" max="0" value="0">
+            <span class="slice-value" id="sliceValue">0 / 0</span>
+          </div>
+        </div>
+        <div class="tissue-grid" id="tissueImages"></div>
       </div>
     </div>
     <div class="card">
