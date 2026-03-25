@@ -74,10 +74,10 @@ body {
   align-items: center;
 }
 
-.card-actions .file-label {
-  margin-left: 0.8rem;
+.file-label {
   font-size: 0.85rem;
   color: var(--text-muted);
+  align-self: center;
 }
 
 .spacer {
@@ -134,6 +134,11 @@ body {
   gap: 0.6rem;
   margin-top: 0.8rem;
   align-items: flex-start;
+}
+
+.params-row > .btn-well,
+.params-row > .spacer {
+  align-self: center;
 }
 
 .params-col {
@@ -306,6 +311,22 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Placeholder */
+.placeholder-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 6rem;
+}
+
+.placeholder-box h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 300;
+  letter-spacing: 0.15em;
+  color: var(--accent);
 }
 
 /* Shared inset card */

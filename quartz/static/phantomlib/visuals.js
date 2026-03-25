@@ -90,6 +90,8 @@ archiveFile.addEventListener('change', function () {
 // --- Phantom table ---
 
 var phantomTableBody = document.getElementById('phantomTableBody');
+var phantomTable = document.getElementById('phantomTable');
+var phantomPlaceholder = document.getElementById('phantomPlaceholder');
 window.selectedPhantom = null;
 
 var btnRetrieve = document.getElementById('btnRetrieve');
@@ -101,7 +103,7 @@ function updateRetrieveState() {
     retrieveLabel.textContent = window.selectedPhantom;
   } else {
     btnRetrieve.disabled = true;
-    retrieveLabel.textContent = 'select a phantom first';
+    retrieveLabel.textContent = 'select phantom first';
   }
 }
 
@@ -113,16 +115,22 @@ function selectPhantomRow(tr) {
   updateRetrieveState();
 }
 
+function showPhantomPlaceholder(text) {
+  phantomPlaceholder.querySelector('h3').textContent = text;
+  phantomPlaceholder.style.display = '';
+  phantomTable.style.display = 'none';
+}
+
 function renderPhantomTable(entries) {
   phantomTableBody.innerHTML = '';
   window.selectedPhantom = null;
   updateRetrieveState();
   if (entries.length === 0) {
-    var tr = document.createElement('tr');
-    tr.innerHTML = '<td colspan="2" class="phantom-table-empty">no phantoms found</td>';
-    phantomTableBody.appendChild(tr);
+    showPhantomPlaceholder('NO DATA');
     return;
   }
+  phantomPlaceholder.style.display = 'none';
+  phantomTable.style.display = '';
   for (var i = 0; i < entries.length; i++) {
     var tr = document.createElement('tr');
     tr.setAttribute('data-name', entries[i][0]);
@@ -142,15 +150,16 @@ function renderPhantomTable(entries) {
 }
 
 function setPhantomTableLoading() {
-  phantomTableBody.innerHTML = '<tr><td colspan="2" class="phantom-table-empty">loading...</td></tr>';
+  showPhantomPlaceholder('LOADING...');
 }
 
 function setPhantomTableError(msg) {
-  phantomTableBody.innerHTML = '<tr><td colspan="2" class="phantom-table-empty">' + msg + '</td></tr>';
+  showPhantomPlaceholder(msg.toUpperCase());
 }
 
 // --- Output result ---
 
+var resultPlaceholder = document.getElementById('resultPlaceholder');
 var resultTitle = document.getElementById('resultTitle');
 var resultTable = document.getElementById('resultTable');
 var resultTableBody = document.getElementById('resultTableBody');
@@ -262,6 +271,8 @@ function renderResult(phantom) {
   currentNy = first.density.shape[1];
   currentNz = first.density.shape[2];
 
+  resultPlaceholder.style.display = 'none';
+  resultTitle.style.display = '';
   resultTitle.textContent = currentTissueNames.length + ' TISSUE(S), ' + currentNx + ' x ' + currentNy + ' x ' + currentNz;
 
   // Tissue properties table
@@ -297,7 +308,8 @@ function renderResult(phantom) {
 function clearResult() {
   currentPhantom = null;
   currentTissueNames = null;
-  resultTitle.textContent = 'RETRIEVE PHANTOM FIRST';
+  resultPlaceholder.style.display = '';
+  resultTitle.style.display = 'none';
   resultTable.style.display = 'none';
   resultTableBody.innerHTML = '';
   sliceControls.style.display = 'none';
