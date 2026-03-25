@@ -68,6 +68,22 @@ body {
   color: var(--text-muted);
 }
 
+.card-actions {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.card-actions .file-label {
+  margin-left: 0.8rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.spacer {
+  flex: 1;
+}
+
 .tags {
   display: flex;
   flex-wrap: wrap;
