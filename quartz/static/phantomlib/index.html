@@ -31,6 +31,22 @@
         <div class="btn-well"><button class="btn btn-accent" id="btnUpload" disabled>Upload</button></div>
       </div>
     </div>
+    <div class="card">
+      <h2>OUTPUT</h2>
+      <pre class="console output-console" id="console-output"></pre>
+    </div>
+  </div>
+  <div class="viewer-overlay" id="viewerOverlay">
+    <div class="viewer-pane card">
+      <div class="viewer-header">
+        <div class="viewer-header-left">
+          <h2>VIEWER</h2>
+          <span class="viewer-subtitle" id="viewerSubtitle"></span>
+        </div>
+        <div class="btn-well viewer-btn-well"><button class="btn viewer-btn" id="viewerClose"></button></div>
+      </div>
+      <pre class="console viewer-console" id="viewerContent"></pre>
+    </div>
   </div>
   <script src="visuals.js"></script>
   <script type="module" src="pipeline.js"></script>

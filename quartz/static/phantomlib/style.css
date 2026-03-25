@@ -188,13 +188,124 @@ body {
   line-height: 1.5;
 }
 
-.placeholder-box {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 8rem;
+.console::after {
+  content: "\23CE";
+  color: var(--accent);
+  opacity: 0.6;
 }
 
-.placeholder-box.inset-card h3 {
-  margin: 0;
+.output-console {
+  height: calc(0.75rem * 1.5 * 7);
+  cursor: pointer;
+}
+
+.output-console.active {
+  color: var(--text);
+}
+
+.output-console.active::after {
+  opacity: 1;
+  animation: pulse-eof 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-eof {
+  0%, 100% { color: var(--text-muted); }
+  50% { color: var(--accent); }
+}
+
+/* Viewer overlay */
+.viewer-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.viewer-overlay.visible {
+  display: flex;
+}
+
+.viewer-pane {
+  width: 100%;
+  max-width: 900px;
+  height: 70vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow:
+    0 1px 2px var(--shadow-dark),
+    inset 0 1px 1px var(--shadow-light),
+    inset 0 -1px 1px var(--shadow-dark);
+  background: var(--bg);
+}
+
+.viewer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.viewer-header-left {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.viewer-subtitle {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.viewer-btn-well {
+  border-radius: 50%;
+  padding: 2px;
+  width: 12px;
+  height: 12px;
+  display: flex;
+}
+
+.viewer-btn {
+  border-radius: 50%;
+  padding: 0;
+  height: 100%;
+  background: var(--accent);
+  border-color: color-mix(in srgb, var(--accent), black 40%);
+  box-shadow:
+    0 1px 2px var(--shadow-dark),
+    inset 0 1px 1px color-mix(in srgb, var(--accent), white 25%),
+    inset 0 -1px 1px color-mix(in srgb, var(--accent), black 25%);
+}
+
+.viewer-console {
+  flex: 1;
+  height: auto;
+  overflow: auto;
+  color: var(--text);
+  scrollbar-width: thin;
+  scrollbar-color: var(--shadow-light) transparent;
+}
+
+.viewer-console::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.viewer-console::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.viewer-console::-webkit-scrollbar-thumb {
+  background: var(--shadow-light);
+  border-radius: 3px;
+}
+
+.viewer-console::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
 }
