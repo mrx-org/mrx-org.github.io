@@ -136,14 +136,18 @@ body {
 
 .phantom-table td {
   padding: 0.4rem 0.6rem;
-  color: var(--text);
+  color: var(--text-muted);
 }
 
 .phantom-table tbody tr {
-  cursor: default;
+  cursor: pointer;
 }
 
 .phantom-table tbody tr:hover td {
+  color: var(--text);
+}
+
+.phantom-table tbody tr.selected td {
   color: var(--accent);
 }
 

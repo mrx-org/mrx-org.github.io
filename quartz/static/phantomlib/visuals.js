@@ -90,9 +90,18 @@ archiveFile.addEventListener('change', function () {
 // --- Phantom table ---
 
 var phantomTableBody = document.getElementById('phantomTableBody');
+window.selectedPhantom = null;
+
+function selectPhantomRow(tr) {
+  var prev = phantomTableBody.querySelector('tr.selected');
+  if (prev) prev.classList.remove('selected');
+  tr.classList.add('selected');
+  window.selectedPhantom = tr.getAttribute('data-name');
+}
 
 function renderPhantomTable(entries) {
   phantomTableBody.innerHTML = '';
+  window.selectedPhantom = null;
   if (entries.length === 0) {
     var tr = document.createElement('tr');
     tr.innerHTML = '<td colspan="2" class="phantom-table-empty">no phantoms found</td>';
@@ -101,14 +110,20 @@ function renderPhantomTable(entries) {
   }
   for (var i = 0; i < entries.length; i++) {
     var tr = document.createElement('tr');
+    tr.setAttribute('data-name', entries[i][0]);
     var tdName = document.createElement('td');
     tdName.textContent = entries[i][0];
     var tdDate = document.createElement('td');
     tdDate.textContent = entries[i][1];
     tr.appendChild(tdName);
     tr.appendChild(tdDate);
+    tr.addEventListener('click', function () {
+      selectPhantomRow(this);
+    });
     phantomTableBody.appendChild(tr);
   }
+  // Select first entry by default
+  selectPhantomRow(phantomTableBody.querySelector('tr'));
 }
 
 function setPhantomTableLoading() {
