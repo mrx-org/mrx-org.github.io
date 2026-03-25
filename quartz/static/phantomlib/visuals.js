@@ -92,16 +92,31 @@ archiveFile.addEventListener('change', function () {
 var phantomTableBody = document.getElementById('phantomTableBody');
 window.selectedPhantom = null;
 
+var btnRetrieve = document.getElementById('btnRetrieve');
+var retrieveLabel = document.getElementById('retrieveLabel');
+
+function updateRetrieveState() {
+  if (window.selectedPhantom) {
+    btnRetrieve.disabled = false;
+    retrieveLabel.textContent = window.selectedPhantom;
+  } else {
+    btnRetrieve.disabled = true;
+    retrieveLabel.textContent = 'select a phantom first';
+  }
+}
+
 function selectPhantomRow(tr) {
   var prev = phantomTableBody.querySelector('tr.selected');
   if (prev) prev.classList.remove('selected');
   tr.classList.add('selected');
   window.selectedPhantom = tr.getAttribute('data-name');
+  updateRetrieveState();
 }
 
 function renderPhantomTable(entries) {
   phantomTableBody.innerHTML = '';
   window.selectedPhantom = null;
+  updateRetrieveState();
   if (entries.length === 0) {
     var tr = document.createElement('tr');
     tr.innerHTML = '<td colspan="2" class="phantom-table-empty">no phantoms found</td>';
@@ -134,6 +149,47 @@ function setPhantomTableError(msg) {
   phantomTableBody.innerHTML = '<tr><td colspan="2" class="phantom-table-empty">' + msg + '</td></tr>';
 }
 
+// --- Output result ---
+
+var outputTitle = document.getElementById('resultTitle');
+var resultTable = document.getElementById('resultTable');
+var resultTableBody = document.getElementById('resultTableBody');
+
+function renderResult(phantom) {
+  var tissues = phantom.tissues;
+  var tissueNames = Array.from(tissues.keys());
+  var first = tissues.values().next().value;
+  var nx = first.density.shape[0];
+  var ny = first.density.shape[1];
+  var nz = first.density.shape[2];
+
+  outputTitle.textContent = tissueNames.length + ' TISSUE(S), ' + nx + ' x ' + ny + ' x ' + nz;
+
+  resultTableBody.innerHTML = '';
+  for (var i = 0; i < tissueNames.length; i++) {
+    var name = tissueNames[i];
+    var t = tissues.get(name);
+    var tr = document.createElement('tr');
+    var tdName = document.createElement('td');
+    tdName.textContent = name;
+    tr.appendChild(tdName);
+    var keys = ['adc', 't1', 't2', 't2dash'];
+    for (var k = 0; k < keys.length; k++) {
+      var td = document.createElement('td');
+      td.textContent = t[keys[k]].toFixed(4);
+      tr.appendChild(td);
+    }
+    resultTableBody.appendChild(tr);
+  }
+  resultTable.style.display = '';
+}
+
+function clearResult() {
+  outputTitle.textContent = 'NO DATA';
+  resultTable.style.display = 'none';
+  resultTableBody.innerHTML = '';
+}
+
 // --- Button handlers ---
 
 document.getElementById('btnRefresh').addEventListener('click', function () {
@@ -148,6 +204,12 @@ btnUpload.addEventListener('click', function () {
   }
 });
 
+btnRetrieve.addEventListener('click', function () {
+  if (window.retrievePhantom) {
+    window.retrievePhantom();
+  }
+});
+
 // --- Expose to pipeline.js (ES module) ---
 
 window.appendLog = appendLog;
@@ -156,3 +218,5 @@ window.setOutputActive = setOutputActive;
 window.renderPhantomTable = renderPhantomTable;
 window.setPhantomTableLoading = setPhantomTableLoading;
 window.setPhantomTableError = setPhantomTableError;
+window.renderResult = renderResult;
+window.clearResult = clearResult;

@@ -42,6 +42,22 @@
       </div>
     </div>
     <div class="card">
+      <h2>RETRIEVAL</h2>
+      <div class="card-actions">
+        <div class="btn-well"><button class="btn btn-accent" id="btnRetrieve" disabled>Retrieve</button></div>
+        <span class="file-label" id="retrieveLabel">select a phantom first</span>
+      </div>
+      <div class="inset-card result-wrap" id="resultContent">
+        <h3 id="resultTitle">NO DATA</h3>
+        <table class="phantom-table result-table" id="resultTable" style="display:none">
+          <thead>
+            <tr><th>TISSUE</th><th>ADC</th><th>T1</th><th>T2</th><th>T2'</th></tr>
+          </thead>
+          <tbody id="resultTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
       <h2>OUTPUT</h2>
       <pre class="console output-console" id="console-output"></pre>
     </div>

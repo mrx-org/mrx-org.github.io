@@ -106,7 +106,80 @@ async function uploadPhantom() {
   }
 }
 
+// --- Retrieve phantom ---
+
+// Default parameters matching demo_sim defaults
+var DEFAULT_RES = { x: 72, y: 87, z: 1 };
+var DEFAULT_VOXEL_SIZE = 2.5;
+
+function buildDefaultAffine() {
+  var vs = DEFAULT_VOXEL_SIZE;
+  var hx = DEFAULT_RES.x / 2;
+  var hy = DEFAULT_RES.y / 2;
+  var hz = DEFAULT_RES.z / 2;
+  return {
+    List: [
+      { TypedList: { Float: [vs, 0, 0, -vs * hx] } },
+      { TypedList: { Float: [0, vs, 0, -vs * hy] } },
+      { TypedList: { Float: [0, 0, vs, -vs * hz] } }
+    ]
+  };
+}
+
+async function retrievePhantom() {
+  var name = window.selectedPhantom;
+  if (!name) return;
+
+  var btn = document.getElementById('btnRetrieve');
+  btn.disabled = true;
+  window.clearLog();
+  window.clearResult();
+  window.setOutputActive(true);
+
+  try {
+    await ensureWasm();
+
+    window.appendLog('Retrieving "' + name + '" ...\n');
+    var t0 = performance.now();
+
+    var result = await call(
+      PHANTOMLIB_ADDR,
+      {
+        Dict: {
+          mode: { Str: 'retrieve' },
+          subject: { Str: name },
+          res_x: { Int: DEFAULT_RES.x },
+          res_y: { Int: DEFAULT_RES.y },
+          res_z: { Int: DEFAULT_RES.z },
+          affine: buildDefaultAffine()
+        }
+      },
+      function (msg) {
+        window.appendLog('> ' + msg + '\n');
+        return true;
+      }
+    );
+
+    var elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+    var phantom = result.SegmentedPhantom;
+    var tissueNames = Array.from(phantom.tissues.keys());
+    var first = phantom.tissues.values().next().value;
+    var nx = first.density.shape[0];
+    var ny = first.density.shape[1];
+    var nz = first.density.shape[2];
+
+    window.appendLog('Retrieved ' + tissueNames.length + ' tissue(s), grid ' + nx + 'x' + ny + 'x' + nz + ' in ' + elapsed + 's\n');
+    window.renderResult(phantom);
+  } catch (err) {
+    window.appendLog('ERROR: ' + err + '\n');
+  } finally {
+    window.setOutputActive(false);
+    btn.disabled = false;
+  }
+}
+
 // --- Expose to visuals.js ---
 
 window.refreshPhantoms = refreshPhantoms;
 window.uploadPhantom = uploadPhantom;
+window.retrievePhantom = retrievePhantom;

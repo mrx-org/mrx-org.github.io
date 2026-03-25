@@ -113,7 +113,8 @@ body {
 }
 
 /* Phantom table */
-.phantom-table-wrap {
+.phantom-table-wrap,
+.result-wrap {
   margin-top: 1.2rem;
 }
 
@@ -161,6 +162,12 @@ body {
   color: var(--text-muted) !important;
   font-style: italic;
   padding: 1.2rem 0.6rem !important;
+}
+
+/* Result table (multi-column, all right-aligned except first) */
+.result-table td + td,
+.result-table th + th {
+  text-align: right;
 }
 
 /* Shared inset card */
