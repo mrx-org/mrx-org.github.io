@@ -2,9 +2,11 @@
 title: Welcome to MRX
 ---
 
-You can find our first application here: [**No-field Scanner**](https://mrx-org.github.io/nofield/)
+You can find our first application here: <a href="https://mrx-org.github.io/nofield/" data-router-ignore><strong>No-field Scanner</strong></a>
 
-A web app comparing the currently available simulations is here: [**MRX Tool Demo**](https://mrx-org.github.io/static/demo_sim/)
+A web app comparing the currently available simulations is here: <a href="/static/demo_sim/" data-router-ignore><strong>MRX Tool Demo</strong></a>
+
+You can upload phantoms and view how to use phantomlib here: <a href="/static/phantomlib/" data-router-ignore><strong>Phantomlib</strong></a>
 
 > [!info] Work in Progress 🚧
 > This documentation is currently under construction and partially severely outdated.
