@@ -112,6 +112,53 @@ body {
   color: var(--accent);
 }
 
+/* Phantom table */
+.phantom-table-wrap {
+  margin-top: 1.2rem;
+}
+
+.phantom-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+  font-size: 0.75rem;
+}
+
+.phantom-table th {
+  text-align: left;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--shadow-light);
+}
+
+.phantom-table td {
+  padding: 0.4rem 0.6rem;
+  color: var(--text);
+}
+
+.phantom-table tbody tr {
+  cursor: default;
+}
+
+.phantom-table tbody tr:hover td {
+  color: var(--accent);
+}
+
+.phantom-table td + td,
+.phantom-table th + th {
+  text-align: right;
+}
+
+.phantom-table-empty {
+  text-align: center !important;
+  color: var(--text-muted) !important;
+  font-style: italic;
+  padding: 1.2rem 0.6rem !important;
+}
+
 /* Shared inset card */
 .inset-card {
   border-radius: 0.75rem;

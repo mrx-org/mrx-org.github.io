@@ -87,10 +87,44 @@ archiveFile.addEventListener('change', function () {
   }
 });
 
+// --- Phantom table ---
+
+var phantomTableBody = document.getElementById('phantomTableBody');
+
+function renderPhantomTable(entries) {
+  phantomTableBody.innerHTML = '';
+  if (entries.length === 0) {
+    var tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="2" class="phantom-table-empty">no phantoms found</td>';
+    phantomTableBody.appendChild(tr);
+    return;
+  }
+  for (var i = 0; i < entries.length; i++) {
+    var tr = document.createElement('tr');
+    var tdName = document.createElement('td');
+    tdName.textContent = entries[i][0];
+    var tdDate = document.createElement('td');
+    tdDate.textContent = entries[i][1];
+    tr.appendChild(tdName);
+    tr.appendChild(tdDate);
+    phantomTableBody.appendChild(tr);
+  }
+}
+
+function setPhantomTableLoading() {
+  phantomTableBody.innerHTML = '<tr><td colspan="2" class="phantom-table-empty">loading...</td></tr>';
+}
+
+function setPhantomTableError(msg) {
+  phantomTableBody.innerHTML = '<tr><td colspan="2" class="phantom-table-empty">' + msg + '</td></tr>';
+}
+
 // --- Button handlers ---
 
 document.getElementById('btnRefresh').addEventListener('click', function () {
-  // TODO: implement refresh
+  if (window.refreshPhantoms) {
+    window.refreshPhantoms();
+  }
 });
 
 btnUpload.addEventListener('click', function () {
@@ -104,3 +138,6 @@ btnUpload.addEventListener('click', function () {
 window.appendLog = appendLog;
 window.clearLog = clearLog;
 window.setOutputActive = setOutputActive;
+window.renderPhantomTable = renderPhantomTable;
+window.setPhantomTableLoading = setPhantomTableLoading;
+window.setPhantomTableError = setPhantomTableError;
