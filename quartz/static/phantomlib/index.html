@@ -43,9 +43,38 @@
     </div>
     <div class="card">
       <h2>RETRIEVAL</h2>
-      <div class="card-actions">
-        <div class="btn-well"><button class="btn btn-accent" id="btnRetrieve" disabled>Retrieve</button></div>
+      <div class="params-row">
+        <div class="params-col">
+          <div class="param-group">
+            <span class="param-label">RES</span>
+            <input class="param-input" id="inputResX" type="number" min="1" max="512" value="72">
+            <input class="param-input" id="inputResY" type="number" min="1" max="512" value="87">
+            <input class="param-input" id="inputResZ" type="number" min="1" max="512" value="72">
+          </div>
+          <div class="param-group">
+            <span class="param-label">OFFSET</span>
+            <input class="param-input" id="inputOffX" type="number" step="1" value="-90">
+            <input class="param-input" id="inputOffY" type="number" step="1" value="-108.75">
+            <input class="param-input" id="inputOffZ" type="number" step="1" value="-90">
+          </div>
+        </div>
+        <div class="param-group affine-group">
+          <span class="param-label">AFFINE</span>
+          <div class="affine-grid">
+            <input class="param-input" id="affine00" type="number" step="0.1" value="2.5">
+            <input class="param-input" id="affine01" type="number" step="0.1" value="0">
+            <input class="param-input" id="affine02" type="number" step="0.1" value="0">
+            <input class="param-input" id="affine10" type="number" step="0.1" value="0">
+            <input class="param-input" id="affine11" type="number" step="0.1" value="2.5">
+            <input class="param-input" id="affine12" type="number" step="0.1" value="0">
+            <input class="param-input" id="affine20" type="number" step="0.1" value="0">
+            <input class="param-input" id="affine21" type="number" step="0.1" value="0">
+            <input class="param-input" id="affine22" type="number" step="0.1" value="2.5">
+          </div>
+        </div>
+        <div class="spacer"></div>
         <span class="file-label" id="retrieveLabel">select a phantom from the list above</span>
+        <div class="btn-well"><button class="btn btn-accent" id="btnRetrieve" disabled>Retrieve</button></div>
       </div>
       <div class="inset-card result-wrap" id="resultContent">
         <h3 id="resultTitle">RETRIEVE PHANTOM FIRST</h3>

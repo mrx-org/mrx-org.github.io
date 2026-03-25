@@ -108,20 +108,37 @@ async function uploadPhantom() {
 
 // --- Retrieve phantom ---
 
-// Default parameters matching demo_sim defaults
-var DEFAULT_RES = { x: 72, y: 87, z: 1 };
-var DEFAULT_VOXEL_SIZE = 2.5;
+function readParams() {
+  var resX = parseInt(document.getElementById('inputResX').value) || 72;
+  var resY = parseInt(document.getElementById('inputResY').value) || 87;
+  var resZ = parseInt(document.getElementById('inputResZ').value) || 72;
 
-function buildDefaultAffine() {
-  var vs = DEFAULT_VOXEL_SIZE;
-  var hx = DEFAULT_RES.x / 2;
-  var hy = DEFAULT_RES.y / 2;
-  var hz = DEFAULT_RES.z / 2;
+  var offX = parseFloat(document.getElementById('inputOffX').value) || 0;
+  var offY = parseFloat(document.getElementById('inputOffY').value) || 0;
+  var offZ = parseFloat(document.getElementById('inputOffZ').value) || 0;
+
+  var a = [
+    [parseFloat(document.getElementById('affine00').value) || 0,
+     parseFloat(document.getElementById('affine01').value) || 0,
+     parseFloat(document.getElementById('affine02').value) || 0],
+    [parseFloat(document.getElementById('affine10').value) || 0,
+     parseFloat(document.getElementById('affine11').value) || 0,
+     parseFloat(document.getElementById('affine12').value) || 0],
+    [parseFloat(document.getElementById('affine20').value) || 0,
+     parseFloat(document.getElementById('affine21').value) || 0,
+     parseFloat(document.getElementById('affine22').value) || 0]
+  ];
+
+  return { resX: resX, resY: resY, resZ: resZ, offX: offX, offY: offY, offZ: offZ, a: a };
+}
+
+function buildAffine(params) {
+  var a = params.a;
   return {
     List: [
-      { TypedList: { Float: [vs, 0, 0, -vs * hx] } },
-      { TypedList: { Float: [0, vs, 0, -vs * hy] } },
-      { TypedList: { Float: [0, 0, vs, -vs * hz] } }
+      { TypedList: { Float: [a[0][0], a[0][1], a[0][2], params.offX] } },
+      { TypedList: { Float: [a[1][0], a[1][1], a[1][2], params.offY] } },
+      { TypedList: { Float: [a[2][0], a[2][1], a[2][2], params.offZ] } }
     ]
   };
 }
@@ -139,7 +156,8 @@ async function retrievePhantom() {
   try {
     await ensureWasm();
 
-    window.appendLog('Retrieving "' + name + '" ...\n');
+    var params = readParams();
+    window.appendLog('Retrieving "' + name + '" (' + params.resX + 'x' + params.resY + 'x' + params.resZ + ', offset [' + params.offX + ',' + params.offY + ',' + params.offZ + '] mm)...\n');
     var t0 = performance.now();
 
     var result = await call(
@@ -148,10 +166,10 @@ async function retrievePhantom() {
         Dict: {
           mode: { Str: 'retrieve' },
           subject: { Str: name },
-          res_x: { Int: DEFAULT_RES.x },
-          res_y: { Int: DEFAULT_RES.y },
-          res_z: { Int: DEFAULT_RES.z },
-          affine: buildDefaultAffine()
+          res_x: { Int: params.resX },
+          res_y: { Int: params.resY },
+          res_z: { Int: params.resZ },
+          affine: buildAffine(params)
         }
       },
       function (msg) {

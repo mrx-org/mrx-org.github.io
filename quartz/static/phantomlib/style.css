@@ -84,6 +84,85 @@ body {
   flex: 1;
 }
 
+/* Parameter inputs */
+.param-group {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.5rem;
+  background: var(--bg-color);
+  box-shadow:
+    inset 1px 1px 2px var(--shadow-dark),
+    inset -1px -1px 2px var(--shadow-light);
+}
+
+.param-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  white-space: nowrap;
+  padding-right: 0.2rem;
+}
+
+.param-unit {
+  font-weight: 400;
+}
+
+.param-input {
+  width: 3.2rem;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 0.8rem;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+
+.param-input::-webkit-outer-spin-button,
+.param-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Params layout */
+.params-row {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 0.8rem;
+  align-items: flex-start;
+}
+
+.params-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* Affine matrix */
+.affine-group {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.affine-group .param-label {
+  padding-top: 0.35rem;
+}
+
+.affine-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 3.2rem);
+  gap: 1px;
+}
+
+.affine-grid .param-input {
+  border-bottom: 1px solid var(--shadow-light);
+}
+
 .tags {
   display: flex;
   flex-wrap: wrap;
