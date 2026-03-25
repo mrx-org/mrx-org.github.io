@@ -16,7 +16,7 @@ You can upload phantoms and view how to use phantomlib here: <a href="/static/ph
 
 # MRX - MR Expertise
 
-Funded by [START-interaktiv](https://www.interaktive-technologien.de/foerderung/bekanntmachungen/start-interaktiv) (BMFTR, February 2026 - January 2029). 
+Funded by [START-interaktiv](https://www.interaktive-technologien.de/projekte/mrx) (BMFTR, February 2026 - January 2029). 
 
 > **3 - year - goal of MRX**
 >
