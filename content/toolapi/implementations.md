@@ -15,14 +15,14 @@ The **Rust crate** is the single source of truth -- it defines all [[toolapi/val
 | Implementation                         | Package                                                           | Role                                           |
 | -------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------- |
 | [Rust](#rust)                          | [toolapi on crates.io](https://crates.io/crates/toolapi)          | Core: defines types, protocol, server + client |
-| [Python](#python)                      | [toolapi on PyPI](https://pypi.org/project/toolapi/)              | Client with idiomatic Python value classes     |
-| [JavaScript / WASM](#javascript--wasm) | [toolapi-wasm on npm](https://www.npmjs.com/package/toolapi-wasm) | Client-only, async `call()` for web apps       |
+| [Python](#python)                      | [toolapi on PyPI](https://pypi.org/project/toolapi/)              | Server + client with idiomatic Python classes  |
+| [JavaScript / WASM](#javascript--wasm) | [toolapi on npm](https://www.npmjs.com/package/toolapi)           | Client-only, async `call()` for web apps       |
 
 ---
 
 ## Rust
 
-> [GitHub](https://github.com/mrx-org/toolapi) | [crates.io](https://crates.io/crates/toolapi) | version `0.4.5` | License: AGPL-3.0
+> [GitHub](https://github.com/mrx-org/toolapi) | [crates.io](https://crates.io/crates/toolapi) | version `0.5.2` | License: AGPL-3.0
 
 The canonical ToolAPI implementation. All other implementations depend on this crate. It provides:
 
@@ -45,14 +45,14 @@ Both `server` and `client` are enabled by default.
 
 ```toml
 [dependencies]
-toolapi = "0.4"
+toolapi = "0.5"
 ```
 
 For client-only usage (e.g. in a CLI or script):
 
 ```toml
 [dependencies]
-toolapi = { version = "0.4", default-features = false, features = ["client"] }
+toolapi = { version = "0.5", default-features = false, features = ["client"] }
 ```
 
 ### Writing a Tool (Server)
@@ -119,9 +119,9 @@ The `on_message` callback receives progress strings from the tool. Returning `fa
 
 ## Python
 
-> [GitHub](https://github.com/mrx-org/toolapi-py) | [PyPI](https://pypi.org/project/toolapi/) | version `0.4.5` | License: AGPL-3.0
+> [GitHub](https://github.com/mrx-org/toolapi-py) | [PyPI](https://pypi.org/project/toolapi/) | version `0.5.2` | License: AGPL-3.0
 
-Python bindings wrapping the Rust `toolapi` crate via [PyO3](https://pyo3.rs/) and [Maturin](https://www.maturin.rs/). Provides a native `call()` function and pure-Python dataclass wrappers for all Value types.
+Python bindings wrapping the Rust `toolapi` crate via [PyO3](https://pyo3.rs/) and [Maturin](https://www.maturin.rs/). Provides a native `call()` function for invoking tools, `run_server()` for writing tools in Python, and pure-Python dataclass wrappers for all Value types.
 
 ### Installation
 
@@ -167,6 +167,36 @@ def call(
 
 The call blocks until the tool finishes. The GIL is released during the WebSocket communication, so other Python threads can run concurrently.
 
+### Writing a Tool (Server)
+
+```python
+from toolapi import run_server
+
+def my_tool(input, send_msg):
+    iterations = input["iterations"]
+    send_msg(f"Running {iterations} iterations...")
+
+    # ... perform computation ...
+
+    return {"result": 42.0}
+
+run_server(my_tool)
+```
+
+The function signature is:
+
+```python
+def run_server(
+    tool: Callable[[Any, MessageFn], Any],
+    index_html: str | None = None,
+) -> None
+```
+
+- `tool`: A callable `(input, send_msg) -> result`. Called for each client connection. `send_msg` sends a message string to the client and raises if the client requested abort.
+- `index_html`: Optional HTML string served at the `/` route.
+
+`run_server` starts a WebSocket server on `0.0.0.0:8080` and blocks until the process is killed. Can only be called once per process.
+
 ### Value Type Mapping
 
 Primitive Python types map directly to ToolAPI values:
@@ -179,6 +209,7 @@ Primitive Python types map directly to ToolAPI values:
 | `float`   | `Float`                                             |
 | `str`     | `Str`                                               |
 | `complex` | `Complex`                                           |
+| `bytes`   | `Bytes`                                             |
 | `dict`    | `Dict` (heterogeneous) or `TypedDict` (homogeneous) |
 | `list`    | `List` (heterogeneous) or `TypedList` (homogeneous) |
 
@@ -256,7 +287,7 @@ adc = InstantSeqEvent.Adc(phase=0.0)
 
 ## JavaScript / WASM
 
-> [GitHub](https://github.com/mrx-org/toolapi-wasm) | [npm](https://www.npmjs.com/package/toolapi-wasm) | version `0.4.5` | License: AGPL-3.0
+> [GitHub](https://github.com/mrx-org/toolapi-wasm) | [npm](https://www.npmjs.com/package/toolapi) | version `0.5.2` | License: AGPL-3.0
 
 A client-only WASM wrapper around the Rust `toolapi` crate, compiled via [wasm-pack](https://rustwasm.github.io/wasm-pack/) and [wasm-bindgen](https://rustwasm.github.io/wasm-bindgen/). Exposes a single async `call()` function for use in browser and other web-compatible environments.
 
@@ -265,7 +296,7 @@ WASM tool servers are not planned -- tools should be hosted natively (in Rust or
 ### Installation
 
 ```bash
-npm install toolapi-wasm
+npm install toolapi
 ```
 
 Or build from source:
@@ -277,7 +308,7 @@ wasm-pack build --target web
 ### Calling a Tool
 
 ```javascript
-import init, { call } from "toolapi-wasm"
+import init, { call } from "toolapi"
 
 await init() // initialize WASM module
 
@@ -320,6 +351,7 @@ Values are serialized via `serde_wasm_bindgen`, using **tagged objects** where t
 | `Float`      | `{ "Float": 3.14 }`                       |
 | `Str`        | `{ "Str": "hello" }`                      |
 | `Complex`    | `{ "Complex": { "re": 1.0, "im": 2.0 } }` |
+| `Bytes`      | `{ "Bytes": Uint8Array }`                  |
 | `Vec3`       | `{ "Vec3": [1.0, 2.0, 3.0] }`             |
 | `Dict`       | `{ "Dict": { "key": <Value>, ... } }`     |
 | `List`       | `{ "List": [<Value>, ...] }`              |

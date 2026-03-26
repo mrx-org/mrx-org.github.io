@@ -23,6 +23,7 @@ The type system is intentionally limited to a small, well-defined set. This prom
 |                | [`Str`](#str)                           | UTF-8 string                                          |
 |                | [`Complex`](#complex)                   | Complex number (real + imaginary `Float`)             |
 |                | [`Vec3`](#vec3)                         | 3-element float vector `[f64; 3]`                     |
+|                | [`Bytes`](#bytes)                       | Raw binary data `Vec<u8>`                             |
 |                | [`Vec4`](#vec4)                         | 4-element float vector `[f64; 4]`                     |
 | **Structured** | [`InstantSeqEvent`](#instantseqevent)   | Instantaneous MRI sequence event (Pulse, Fid, or Adc) |
 |                | [`Volume`](#volume)                     | 3D voxel grid with affine transform                   |
@@ -60,6 +61,10 @@ UTF-8 encoded string.
 ### Complex
 
 Complex number, encoded as two `Float`s (real and imaginary part). Uses `num_complex::Complex64` in Rust, `complex` in Python, and `{ re, im }` in JavaScript.
+
+### Bytes
+
+Raw binary data, stored as `Vec<u8>`. Uses the `serde_bytes` crate for efficient binary serialization (compact encoding instead of a JSON array of numbers). Maps to `bytes` in Python and `Uint8Array` in JavaScript.
 
 ### Vec3
 
@@ -174,5 +179,29 @@ let t1: f64 = input.get("tissues/white_matter/t1")?.try_into()?;
 ```
 
 Path segments that parse as integers index into `List` / `TypedList`; string segments index into `Dict` / `TypedDict`.
+
+### Collection Extraction
+
+Typed collections can be extracted directly to standard Rust types using `TryFrom` / `try_into()`:
+
+```rust
+// TypedList → Vec<T>
+let signal: Vec<f64> = output.try_into()?;
+
+// TypedDict → HashMap<String, T>
+let params: HashMap<String, f64> = input.try_into()?;
+```
+
+The reverse also works — `Vec<T>` and `HashMap<String, T>` convert into `Value` via `From`:
+
+```rust
+let result = Value::from(vec![1.0, 2.5, 3.14]);         // → TypedList::Float
+let result = Value::from(HashMap::from([                  // → TypedDict::Float
+    ("mean".into(), 2.5),
+    ("std".into(), 0.3),
+]));
+```
+
+These conversions are available for all value types (atomic, structured, and `Bytes`).
 
 See also: [[toolapi/implementations|Implementations]] for language-specific value handling.
