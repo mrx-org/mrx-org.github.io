@@ -2,15 +2,11 @@
 title: Welcome to MRX
 ---
 
-You can find our first application here: <a href="https://mrx-org.github.io/nofield/" data-router-ignore><strong>No-field Scanner</strong></a>
-
-A web app comparing the currently available simulations is here: <a href="/static/demo_sim/" data-router-ignore><strong>MRX Tool Demo</strong></a>
-
-You can upload phantoms and view how to use phantomlib here: <a href="/static/phantomlib/" data-router-ignore><strong>Phantomlib</strong></a>
-
-> [!info] Work in Progress 🚧
-> This documentation is currently under construction and partially severely outdated.
-> An up-to-date list of current projects can be found in [[repo_overview]].
+> [!summary] Examples
+> - Web-app demonstrating MRX without installation: <a href="https://mrx-org.github.io/nofield/" data-router-ignore><strong>No-field Scanner</strong></a>
+> - Demo of currently available simulations: <a href="/static/demo_sim/" data-router-ignore><strong>MRX Tool Demo</strong></a>
+> - Upload and view available phantoms <a href="/static/phantomlib/" data-router-ignore><strong>Phantomlib</strong></a>
+> - How to use the `toolapi` from python: <a href="https://colab.research.google.com/github/mrx-org/mrx-org.github.io/blob/main/notebooks/toolapi_simulation_demo.ipynb"><strong>Colab Notebook</strong></a>
 
 ---
 
