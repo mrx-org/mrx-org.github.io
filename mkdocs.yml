@@ -1,0 +1,21 @@
+site_name: MRX
+site_url: https://mrx-org.github.io/
+repo_url: https://github.com/mrx-org
+
+theme:
+  name: material
+  logo: assets/logo.png
+  favicon: assets/logo.png
+
+plugins:
+  - tags
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
