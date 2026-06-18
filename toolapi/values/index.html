@@ -1,0 +1,1841 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://mrx-org.github.io/toolapi/values/">
+      
+      
+        <link rel="prev" href="../implementations/">
+      
+      
+        <link rel="next" href="../../tools/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Value Types - MRX</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#overview" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="MRX" class="md-header__button md-logo" aria-label="MRX" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            MRX
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Value Types
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/mrx-org" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="MRX" class="md-nav__button md-logo" aria-label="MRX" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    MRX
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/mrx-org" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Welcome
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../repo_overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repository overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tags/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tags
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Apps
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Apps
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../apps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Apps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Toolapi
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Toolapi
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ToolAPI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../implementations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5_3" id="__nav_5_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Values
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Values
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Value Types
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Value Types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#atomic-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Atomic Types
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Atomic Types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#none" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        None
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bool
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#int" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Int
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#float" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Float
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#str" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Str
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#complex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Complex
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bytes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vec3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vec3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vec4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vec4
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#structured-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Structured Types
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Structured Types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#instantseqevent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        InstantSeqEvent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#volume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Volume
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#segmentedphantom" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SegmentedPhantom
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phantomtissue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PhantomTissue
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dynamic-collections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dynamic Collections
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Dynamic Collections">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dict
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        List
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#typed-collections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Typed Collections
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Typed Collections">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#typedlist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TypedList
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#typeddict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TypedDict
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#extracting-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extracting Values
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Extracting Values">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#collection-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Collection Extraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tools
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tools/conseq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sequence Converter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tools/mr0sim/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MR-zero Simulation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tools/phantomlib/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Phantom Library
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tools/rapisim/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rapid MRI Simulation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tools/spinsim/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spin Simulation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tools/trajex/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trajectory Extractor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#atomic-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Atomic Types
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Atomic Types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#none" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        None
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bool
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#int" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Int
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#float" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Float
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#str" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Str
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#complex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Complex
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bytes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vec3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vec3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vec4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vec4
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#structured-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Structured Types
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Structured Types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#instantseqevent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        InstantSeqEvent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#volume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Volume
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#segmentedphantom" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SegmentedPhantom
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phantomtissue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PhantomTissue
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dynamic-collections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dynamic Collections
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Dynamic Collections">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dict
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        List
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#typed-collections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Typed Collections
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Typed Collections">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#typedlist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TypedList
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#typeddict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TypedDict
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#extracting-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extracting Values
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Extracting Values">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#collection-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Collection Extraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  <nav class="md-tags" >
+    
+      
+      
+      
+      
+        <a href="../../tags/#tag:toolapi" class="md-tag">toolapi</a>
+      
+    
+      
+      
+      
+      
+        <a href="../../tags/#tag:values" class="md-tag">values</a>
+      
+    
+  </nav>
+
+
+  
+  
+
+
+  <h1>Value Types</h1>
+
+<p>The <a href="../">ToolAPI</a> exchanges data between clients and tools using a canonical set of typed values. Upon calling a tool, the client sends a <code>Value</code> as input; when finished, the tool returns a <code>Value</code> as output.</p>
+<p>The type system is intentionally limited to a small, well-defined set. This promotes interoperability: tools with similar purposes can be exchanged freely, because they all speak the same types. Structured types exist to give values that could be expressed with <code>Dict</code>s and <code>List</code>s a known structure and semantic meaning that tools and clients can rely on.</p>
+<div class="admonition info">
+<p class="admonition-title">Design principle</p>
+<p>The number of structured types is kept low to maximize reusability. For niche applications, it is preferred that tool and client agree on a structure using dynamic types (<code>Dict</code>, <code>List</code>) rather than extending the ToolAPI with new structured types.</p>
+</div>
+<h2 id="overview">Overview</h2>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Atomic</strong></td>
+<td><a href="#none"><code>None</code></a></td>
+<td>Absence of a value</td>
+</tr>
+<tr>
+<td></td>
+<td><a href="#bool"><code>Bool</code></a></td>
+<td><code>true</code> or <code>false</code></td>
+</tr>
+<tr>
+<td></td>
+<td><a href="#int"><code>Int</code></a></td>
+<td>64-bit signed integer</td>
+</tr>
+<tr>
+<td></td>
+<td><a href="#float"><code>Float</code></a></td>
+<td>64-bit IEEE 754 double</td>
+</tr>
+<tr>
+<td></td>
+<td><a href="#str"><code>Str</code></a></td>
+<td>UTF-8 string</td>
+</tr>
+<tr>
+<td></td>
+<td><a href="#complex"><code>Complex</code></a></td>
+<td>Complex number (real + imaginary <code>Float</code>)</td>
+</tr>
+<tr>
+<td></td>
+<td><a href="#vec3"><code>Vec3</code></a></td>
+<td>3-element float vector <code>[f64; 3]</code></td>
+</tr>
+<tr>
+<td></td>
+<td><a href="#bytes"><code>Bytes</code></a></td>
+<td>Raw binary data <code>Vec&lt;u8&gt;</code></td>
+</tr>
+<tr>
+<td></td>
+<td><a href="#vec4"><code>Vec4</code></a></td>
+<td>4-element float vector <code>[f64; 4]</code></td>
+</tr>
+<tr>
+<td><strong>Structured</strong></td>
+<td><a href="#instantseqevent"><code>InstantSeqEvent</code></a></td>
+<td>Instantaneous MRI sequence event (Pulse, Fid, or Adc)</td>
+</tr>
+<tr>
+<td></td>
+<td><a href="#volume"><code>Volume</code></a></td>
+<td>3D voxel grid with affine transform</td>
+</tr>
+<tr>
+<td></td>
+<td><a href="#segmentedphantom"><code>SegmentedPhantom</code></a></td>
+<td>Multi-tissue MRI phantom</td>
+</tr>
+<tr>
+<td></td>
+<td><a href="#phantomtissue"><code>PhantomTissue</code></a></td>
+<td>Single tissue with relaxation parameters</td>
+</tr>
+<tr>
+<td><strong>Dynamic</strong></td>
+<td><a href="#dict"><code>Dict</code></a></td>
+<td>String-keyed map of heterogeneous values</td>
+</tr>
+<tr>
+<td></td>
+<td><a href="#list"><code>List</code></a></td>
+<td>Ordered sequence of heterogeneous values</td>
+</tr>
+<tr>
+<td><strong>Typed</strong></td>
+<td><a href="#typedlist"><code>TypedList</code></a></td>
+<td>Homogeneous list (one variant per value type)</td>
+</tr>
+<tr>
+<td></td>
+<td><a href="#typeddict"><code>TypedDict</code></a></td>
+<td>Homogeneous dict (one variant per value type)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="atomic-types">Atomic Types</h2>
+<h3 id="none">None</h3>
+<p>Absence of a value. Maps to <code>None</code> in Python, <code>null</code> in JavaScript.</p>
+<h3 id="bool">Bool</h3>
+<p>Boolean value: <code>true</code> or <code>false</code>.</p>
+<h3 id="int">Int</h3>
+<p>64-bit signed integer. Ranges from \(-2^{63}\) to \(2^{63} - 1\).</p>
+<h3 id="float">Float</h3>
+<p>Double-precision (64-bit) IEEE 754 floating point value.</p>
+<h3 id="str">Str</h3>
+<p>UTF-8 encoded string.</p>
+<h3 id="complex">Complex</h3>
+<p>Complex number, encoded as two <code>Float</code>s (real and imaginary part). Uses <code>num_complex::Complex64</code> in Rust, <code>complex</code> in Python, and <code>{ re, im }</code> in JavaScript.</p>
+<h3 id="bytes">Bytes</h3>
+<p>Raw binary data, stored as <code>Vec&lt;u8&gt;</code>. Uses the <code>serde_bytes</code> crate for efficient binary serialization (compact encoding instead of a JSON array of numbers). Maps to <code>bytes</code> in Python and <code>Uint8Array</code> in JavaScript.</p>
+<h3 id="vec3">Vec3</h3>
+<p>A 3-element float vector: <code>[f64; 3]</code>. Used for spatial positions, FOV sizes, and similar 3D quantities.</p>
+<h3 id="vec4">Vec4</h3>
+<p>A 4-element float vector: <code>[f64; 4]</code>. Used for k-space encoding <code>[kx, ky, kz, t]</code> and similar quantities.</p>
+<hr />
+<h2 id="structured-types">Structured Types</h2>
+<p>These types carry MRI-specific semantic meaning. They have a fixed structure that tools and clients can rely on.</p>
+<h3 id="instantseqevent">InstantSeqEvent</h3>
+<p>An instantaneous MRI sequence event. This is a tagged union with three variants:</p>
+<table>
+<thead>
+<tr>
+<th>Variant</th>
+<th>Fields</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Pulse</code></td>
+<td><code>angle: Float</code>, <code>phase: Float</code></td>
+<td>An instantaneous RF pulse</td>
+</tr>
+<tr>
+<td><code>Fid</code></td>
+<td><code>kt: Vec4</code></td>
+<td>Free induction decay with encoding <code>[kx, ky, kz, t]</code></td>
+</tr>
+<tr>
+<td><code>Adc</code></td>
+<td><code>phase: Float</code></td>
+<td>An ADC sample capturing the current signal</td>
+</tr>
+</tbody>
+</table>
+<p>This type is used for discrete-event sequence representations, optimized for simulations that operate on gradient moments and timing rather than continuous pulse shapes.</p>
+<h3 id="volume">Volume</h3>
+<p>A 3D voxel grid with an affine transform describing its position and orientation in physical space.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>shape</code></td>
+<td><code>[u64; 3]</code></td>
+<td>Number of voxels in each dimension</td>
+</tr>
+<tr>
+<td><code>affine</code></td>
+<td><code>[[f64; 4]; 3]</code></td>
+<td>3x4 affine matrix mapping voxel indices to physical coordinates</td>
+</tr>
+<tr>
+<td><code>data</code></td>
+<td><code>TypedList</code></td>
+<td>Flattened voxel data (type depends on content, e.g. <code>Float</code>, <code>Complex</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>data</code> field uses a <code>TypedList</code> for efficient, homogeneous storage. The element type depends on the context -- a density map might use <code>Float</code>, while a coil sensitivity map might use <code>Complex</code>.</p>
+<h3 id="segmentedphantom">SegmentedPhantom</h3>
+<p>A multi-tissue segmented MRI phantom. Unlike classical voxel phantoms where each voxel has independent tissue parameters, a segmented phantom groups voxels by tissue type.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tissues</code></td>
+<td><code>HashMap&lt;String, PhantomTissue&gt;</code></td>
+<td>Named tissues (e.g. <code>"white_matter"</code>, <code>"gray_matter"</code>)</td>
+</tr>
+<tr>
+<td><code>b1_tx</code></td>
+<td><code>Vec&lt;Volume&gt;</code></td>
+<td>B1 transmit sensitivity maps (one per transmit channel)</td>
+</tr>
+<tr>
+<td><code>b1_rx</code></td>
+<td><code>Vec&lt;Volume&gt;</code></td>
+<td>B1 receive sensitivity maps (one per receive coil)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="phantomtissue">PhantomTissue</h3>
+<p>A single tissue within a <code>SegmentedPhantom</code>, containing spatially-varying maps and scalar relaxation parameters.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>density</code></td>
+<td><code>Volume</code></td>
+<td>Proton density map \([a.u.]\)</td>
+</tr>
+<tr>
+<td><code>db0</code></td>
+<td><code>Volume</code></td>
+<td>\(\Delta B_0\) off-resonance map \([Hz]\)</td>
+</tr>
+<tr>
+<td><code>t1</code></td>
+<td><code>Float</code></td>
+<td>\(T_1\) relaxation time \([s]\)</td>
+</tr>
+<tr>
+<td><code>t2</code></td>
+<td><code>Float</code></td>
+<td>\(T_2\) relaxation time \([s]\)</td>
+</tr>
+<tr>
+<td><code>t2dash</code></td>
+<td><code>Float</code></td>
+<td>\(T_2'\) dephasing time \([s]\)</td>
+</tr>
+<tr>
+<td><code>adc</code></td>
+<td><code>Float</code></td>
+<td>Apparent diffusion coefficient \([10^{-3}\ mm^2/s]\)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="dynamic-collections">Dynamic Collections</h2>
+<h3 id="dict">Dict</h3>
+<p>A string-keyed map where each value can be a different <code>Value</code> type. This is the standard way to pass named parameters to tools and return named results.</p>
+<div class="highlight"><pre><span></span><code>Dict { &quot;flip_angle&quot;: Float(0.26), &quot;resolution&quot;: List([Int(128), Int(128), Int(1)]) }
+</code></pre></div>
+<h3 id="list">List</h3>
+<p>An ordered sequence where each element can be a different <code>Value</code> type.</p>
+<div class="highlight"><pre><span></span><code>List [Float(1.0), Int(42), Str(&quot;hello&quot;)]
+</code></pre></div>
+<hr />
+<h2 id="typed-collections">Typed Collections</h2>
+<p>For performance, homogeneous collections are stored as <code>TypedList</code> and <code>TypedDict</code> instead of <code>List</code> and <code>Dict</code>. They avoid the overhead of wrapping every element in a <code>Value</code> enum.</p>
+<h3 id="typedlist">TypedList</h3>
+<p>A homogeneous list with one variant per value type. For example, <code>TypedList::Float(Vec&lt;f64&gt;)</code> stores a list of floats without per-element tagging.</p>
+<p>In Python and JavaScript, typed lists are represented as regular <code>list</code> / <code>Array</code> -- the type is inferred automatically from the element types during serialization.</p>
+<h3 id="typeddict">TypedDict</h3>
+<p>A homogeneous string-keyed map, analogous to <code>TypedList</code>. For example, <code>TypedDict::Int(HashMap&lt;String, i64&gt;)</code>.</p>
+<hr />
+<h2 id="extracting-values">Extracting Values</h2>
+<p>Values can be indexed using a path-based syntax. The <code>Value::get(pointer)</code> method (Rust) accepts a <code>/</code>-separated path to navigate nested structures:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Extract from nested Dict / List</span>
+<span class="kd">let</span><span class="w"> </span><span class="n">val</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">input</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="s">&quot;tissues/white_matter/t1&quot;</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+<span class="kd">let</span><span class="w"> </span><span class="n">val</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">input</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="s">&quot;events/0/angle&quot;</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+
+<span class="c1">// Convert to a concrete Rust type</span>
+<span class="kd">let</span><span class="w"> </span><span class="n">t1</span><span class="p">:</span><span class="w"> </span><span class="kt">f64</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">input</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="s">&quot;tissues/white_matter/t1&quot;</span><span class="p">)</span><span class="o">?</span><span class="p">.</span><span class="n">try_into</span><span class="p">()</span><span class="o">?</span><span class="p">;</span>
+</code></pre></div>
+<p>Path segments that parse as integers index into <code>List</code> / <code>TypedList</code>; string segments index into <code>Dict</code> / <code>TypedDict</code>.</p>
+<h3 id="collection-extraction">Collection Extraction</h3>
+<p>Typed collections can be extracted directly to standard Rust types using <code>TryFrom</code> / <code>try_into()</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// TypedList → Vec&lt;T&gt;</span>
+<span class="kd">let</span><span class="w"> </span><span class="n">signal</span><span class="p">:</span><span class="w"> </span><span class="nb">Vec</span><span class="o">&lt;</span><span class="kt">f64</span><span class="o">&gt;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">output</span><span class="p">.</span><span class="n">try_into</span><span class="p">()</span><span class="o">?</span><span class="p">;</span>
+
+<span class="c1">// TypedDict → HashMap&lt;String, T&gt;</span>
+<span class="kd">let</span><span class="w"> </span><span class="n">params</span><span class="p">:</span><span class="w"> </span><span class="nc">HashMap</span><span class="o">&lt;</span><span class="nb">String</span><span class="p">,</span><span class="w"> </span><span class="kt">f64</span><span class="o">&gt;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">input</span><span class="p">.</span><span class="n">try_into</span><span class="p">()</span><span class="o">?</span><span class="p">;</span>
+</code></pre></div>
+<p>The reverse also works — <code>Vec&lt;T&gt;</code> and <code>HashMap&lt;String, T&gt;</code> convert into <code>Value</code> via <code>From</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="kd">let</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Value</span><span class="p">::</span><span class="n">from</span><span class="p">(</span><span class="fm">vec!</span><span class="p">[</span><span class="mf">1.0</span><span class="p">,</span><span class="w"> </span><span class="mf">2.5</span><span class="p">,</span><span class="w"> </span><span class="mf">3.14</span><span class="p">]);</span><span class="w">         </span><span class="c1">// → TypedList::Float</span>
+<span class="kd">let</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Value</span><span class="p">::</span><span class="n">from</span><span class="p">(</span><span class="n">HashMap</span><span class="p">::</span><span class="n">from</span><span class="p">([</span><span class="w">                  </span><span class="c1">// → TypedDict::Float</span>
+<span class="w">    </span><span class="p">(</span><span class="s">&quot;mean&quot;</span><span class="p">.</span><span class="n">into</span><span class="p">(),</span><span class="w"> </span><span class="mf">2.5</span><span class="p">),</span>
+<span class="w">    </span><span class="p">(</span><span class="s">&quot;std&quot;</span><span class="p">.</span><span class="n">into</span><span class="p">(),</span><span class="w"> </span><span class="mf">0.3</span><span class="p">),</span>
+<span class="p">]));</span>
+</code></pre></div>
+<p>These conversions are available for all value types (atomic, structured, and <code>Bytes</code>).</p>
+<p>See also: <a href="../implementations/">Implementations</a> for language-specific value handling.</p>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": [], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

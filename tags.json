@@ -1,0 +1,1 @@
+{"mappings": [{"item": {"url": "toolapi/", "title": "ToolAPI"}, "tags": ["architecture", "toolapi"]}, {"item": {"url": "toolapi/implementations/", "title": "Implementations"}, "tags": ["javascript", "python", "rust", "toolapi", "wasm"]}, {"item": {"url": "toolapi/values/", "title": "Value Types"}, "tags": ["toolapi", "values"]}]}
