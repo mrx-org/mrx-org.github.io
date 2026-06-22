@@ -34,4 +34,3 @@ This allows to use them to construct new products which go beyond the target of 
 
 - [`MRX: ToolAPI`](toolapi/index.md): Connect any application with any MRX world-model tool, easily. Allows quick experimentation: comparing implementations, testing tools in various scenarios. Developed first as it helps with the development of the other building blocks.
 - [Tools](tools/index.md): Tools built in Rust and Python, using the `MRX: ToolAPI`.
-- [Apps](apps/index.md): Apps using different Tools to build Products.

@@ -6,16 +6,77 @@ theme:
   name: material
   logo: assets/logo.png
   favicon: assets/logo.png
-
-plugins:
-  - tags
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo        # an dein Logo/Brand anpassen
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.tabs          # Top-Level als Tabs oben
+    - navigation.sections
+    - navigation.top           # "back to top"
+    - navigation.instant       # SPA-artiges Laden
+    - navigation.instant.progress
+    - navigation.footer        # Prev/Next unten
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy        # Copy-Button an Codeblöcken
+    - content.code.annotate
+    - content.tabs.link
 
 markdown_extensions:
   - admonition
+  - attr_list                  # Buttons & Grid-Cards
+  - md_in_html                 # Grid-Cards
+  - tables
   - pymdownx.details
-  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true    # Python/TS/Rust-Tabs
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
+
+plugins:
+  - search
+  - tags
+  - social
+  - git-revision-date-localized:
+      type: date
+
+nav:
+  - Welcome: index.md
+  - Repository overview: repo_overview.md
+  - ToolAPI:
+      - toolapi/index.md
+      - Implementations: toolapi/implementations.md
+      - Value Types: toolapi/values/index.md
+  - Tools:
+      - tools/index.md
+      - Sequence Converter: tools/conseq.md
+      - MR-zero Simulation: tools/mr0sim.md
+      - Phantom Library: tools/phantomlib.md
+      - Rapid MRI Simulation: tools/rapisim.md
+      - Spin Simulation: tools/spinsim.md
+      - Trajectory Extractor: tools/trajex.md
+  - Any-field Scanner: https://mrx-org.github.io/anyfield/
+  - Tags: tags.md
