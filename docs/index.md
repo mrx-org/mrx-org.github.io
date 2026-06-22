@@ -4,7 +4,7 @@ title: Welcome
 
 !!! summary "Examples"
 
-    - Web-app demonstrating MRX without installation: <a href="https://mrx-org.github.io/nofield/" data-router-ignore><strong>No-field Scanner</strong></a>
+    - Web-app demonstrating MRX without installation: <a href="https://mrx-org.github.io/anyfield/" data-router-ignore><strong>No-field Scanner</strong></a>
     - Demo of currently available simulations: <a href="/static/demo_sim/" data-router-ignore><strong>MRX Tool Demo</strong></a>
     - Upload and view available phantoms <a href="/static/phantomlib/" data-router-ignore><strong>Phantomlib</strong></a>
     - How to use the `toolapi` from python: <a href="https://colab.research.google.com/github/mrx-org/mrx-org.github.io/blob/main/notebooks/toolapi_simulation_demo.ipynb"><strong>Colab Notebook</strong></a>
