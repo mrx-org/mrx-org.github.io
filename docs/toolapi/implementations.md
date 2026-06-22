@@ -12,349 +12,342 @@ ToolAPI aims to connect tools and clients written in any language. It should be 
 
 The **Rust crate** is the single source of truth -- it defines all [value types](./values/index.md), the wire protocol, and both server and client logic. The **Python** and **JavaScript/WASM** packages wrap this core with language-idiomatic APIs.
 
-| Implementation                         | Package                                                           | Role                                           |
-| -------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------- |
-| [Rust](#rust)                          | [toolapi on crates.io](https://crates.io/crates/toolapi)          | Core: defines types, protocol, server + client |
-| [Python](#python)                      | [toolapi on PyPI](https://pypi.org/project/toolapi/)              | Server + client with idiomatic Python classes  |
-| [JavaScript / WASM](#javascript-wasm) | [toolapi on npm](https://www.npmjs.com/package/toolapi)           | Client-only, async `call()` for web apps       |
+| Implementation     | Package                                                           | Role                                           |
+| ------------------ | ----------------------------------------------------------------- | ---------------------------------------------- |
+| Rust               | [toolapi on crates.io](https://crates.io/crates/toolapi)          | Core: defines types, protocol, server + client |
+| Python             | [toolapi on PyPI](https://pypi.org/project/toolapi/)              | Server + client with idiomatic Python classes  |
+| JavaScript / WASM  | [toolapi on npm](https://www.npmjs.com/package/toolapi)           | Client-only, async `call()` for web apps       |
 
----
+=== "Rust"
 
-## Rust
+    > [GitHub](https://github.com/mrx-org/toolapi) | [crates.io](https://crates.io/crates/toolapi) | version `0.5.2` | License: AGPL-3.0
 
-> [GitHub](https://github.com/mrx-org/toolapi) | [crates.io](https://crates.io/crates/toolapi) | version `0.5.2` | License: AGPL-3.0
+    The canonical ToolAPI implementation. All other implementations depend on this crate. It provides:
 
-The canonical ToolAPI implementation. All other implementations depend on this crate. It provides:
+    - The complete [Value](./values/index.md) type system
+    - MessagePack + zstd serialization (pure Rust, WASM-compatible)
+    - A WebSocket server framework for writing tools (`run_server`)
+    - A WebSocket client for invoking tools (`call`)
 
-- The complete [Value](./values/index.md) type system
-- MessagePack + zstd serialization (pure Rust, WASM-compatible)
-- A WebSocket server framework for writing tools (`run_server`)
-- A WebSocket client for invoking tools (`call`)
+    ### Feature Flags
 
-### Feature Flags
+    | Feature  | Description                                                        |
+    | -------- | ------------------------------------------------------------------ |
+    | `server` | Axum-based WebSocket server (native only)                          |
+    | `client` | WebSocket client (tungstenite on native, ws_stream_wasm on wasm32) |
+    | `pyo3`   | PyO3 `FromPyObject` / `IntoPyObject` impls for all Value types     |
 
-| Feature  | Description                                                        |
-| -------- | ------------------------------------------------------------------ |
-| `server` | Axum-based WebSocket server (native only)                          |
-| `client` | WebSocket client (tungstenite on native, ws_stream_wasm on wasm32) |
-| `pyo3`   | PyO3 `FromPyObject` / `IntoPyObject` impls for all Value types     |
+    Both `server` and `client` are enabled by default.
 
-Both `server` and `client` are enabled by default.
+    ### Installation
 
-### Installation
+    ```toml
+    [dependencies]
+    toolapi = "0.5"
+    ```
 
-```toml
-[dependencies]
-toolapi = "0.5"
-```
+    For client-only usage (e.g. in a CLI or script):
 
-For client-only usage (e.g. in a CLI or script):
+    ```toml
+    [dependencies]
+    toolapi = { version = "0.5", default-features = false, features = ["client"] }
+    ```
 
-```toml
-[dependencies]
-toolapi = { version = "0.5", default-features = false, features = ["client"] }
-```
+    ### Writing a Tool (Server)
 
-### Writing a Tool (Server)
+    A tool is a function with the signature `fn(Value, &mut MessageFn) -> Result<Value, ToolError>`. It receives the client's input as a `Value`, can send progress messages via the `MessageFn`, and returns a result.
 
-A tool is a function with the signature `fn(Value, &mut MessageFn) -> Result<Value, ToolError>`. It receives the client's input as a `Value`, can send progress messages via the `MessageFn`, and returns a result.
+    ```rust
+    use toolapi::{run_server, Value, MessageFn, ToolError};
 
-```rust
-use toolapi::{run_server, Value, MessageFn, ToolError};
+    fn my_tool(input: Value, send_msg: &mut MessageFn) -> Result<Value, ToolError> {
+        let iterations: i64 = input.get("iterations")?.try_into()?;
 
-fn my_tool(input: Value, send_msg: &mut MessageFn) -> Result<Value, ToolError> {
-    // Extract parameters from input (a Dict)
-    let iterations: i64 = input.get("iterations")?.try_into()?;
+        send_msg(format!("Running {iterations} iterations..."))?;
 
-    send_msg(format!("Running {iterations} iterations..."))?;
+        // ... perform computation ...
 
-    // ... perform computation ...
-
-    Ok(Value::Float(42.0))
-}
-
-fn main() -> Result<(), std::io::Error> {
-    run_server(my_tool, None)
-}
-```
-
-`run_server` starts an Axum WebSocket server on `0.0.0.0:8080`:
-
-- `GET /` serves an optional static HTML page (pass `Some(INDEX_HTML)` as second argument)
-- `/tool` accepts WebSocket connections from clients
-
-### Calling a Tool (Client)
-
-```rust
-use toolapi::{call, Value};
-
-fn main() {
-    let input = Value::Dict(/* ... build input parameters ... */);
-
-    let result = call("wss://tool-example.fly.dev/tool", input, |msg| {
-        println!("[tool] {msg}");
-        true // return false to abort
-    });
-
-    match result {
-        Ok(output) => println!("Result: {output:?}"),
-        Err(err) => eprintln!("Error: {err}"),
+        Ok(Value::Float(42.0))
     }
-}
-```
 
-The `on_message` callback receives progress strings from the tool. Returning `false` sends an `Abort` signal.
+    fn main() -> Result<(), std::io::Error> {
+        run_server(my_tool, None)
+    }
+    ```
 
-### Key Types
+    `run_server` starts an Axum WebSocket server on `0.0.0.0:8080`:
 
-| Type            | Description                                                                   |
-| --------------- | ----------------------------------------------------------------------------- |
-| `Value`         | Dynamic typed enum -- the core data type exchanged between tool and client    |
-| `MessageFn`     | `dyn FnMut(String) -> Result<(), AbortReason>` -- send progress, detect abort |
-| `ToolFn`        | `fn(Value, &mut MessageFn) -> Result<Value, ToolError>` -- tool signature     |
-| `ToolError`     | Error returned by a tool: `Extraction`, `Abort`, or `Custom(String)`          |
-| `ToolCallError` | Client-side error from `call()`: connection, protocol, or tool errors         |
+    - `GET /` serves an optional static HTML page (pass `Some(INDEX_HTML)` as second argument)
+    - `/tool` accepts WebSocket connections from clients
 
----
+    ### Calling a Tool (Client)
 
-## Python
+    ```rust
+    use toolapi::{call, Value};
 
-> [GitHub](https://github.com/mrx-org/toolapi-py) | [PyPI](https://pypi.org/project/toolapi/) | version `0.5.2` | License: AGPL-3.0
+    fn main() {
+        let input = Value::Dict(/* ... build input parameters ... */);
 
-Python bindings wrapping the Rust `toolapi` crate via [PyO3](https://pyo3.rs/) and [Maturin](https://www.maturin.rs/). Provides a native `call()` function for invoking tools, `run_server()` for writing tools in Python, and pure-Python dataclass wrappers for all Value types.
+        let result = call("wss://tool-example.fly.dev/tool", input, |msg| {
+            println!("[tool] {msg}");
+            true // return false to abort
+        });
 
-### Installation
+        match result {
+            Ok(output) => println!("Result: {output:?}"),
+            Err(err) => eprintln!("Error: {err}"),
+        }
+    }
+    ```
 
-```bash
-pip install toolapi
-```
+    The `on_message` callback receives progress strings from the tool. Returning `false` sends an `Abort` signal.
 
-!!! note
+    ### Key Types
 
-    The package is named `toolapi` on PyPI (not `toolapi-py`). It ships a compiled native extension for the platform -- no Rust toolchain needed at install time.
+    | Type            | Description                                                                   |
+    | --------------- | ----------------------------------------------------------------------------- |
+    | `Value`         | Dynamic typed enum -- the core data type exchanged between tool and client    |
+    | `MessageFn`     | `dyn FnMut(String) -> Result<(), AbortReason>` -- send progress, detect abort |
+    | `ToolFn`        | `fn(Value, &mut MessageFn) -> Result<Value, ToolError>` -- tool signature     |
+    | `ToolError`     | Error returned by a tool: `Extraction`, `Abort`, or `Custom(String)`          |
+    | `ToolCallError` | Client-side error from `call()`: connection, protocol, or tool errors         |
 
-### Calling a Tool
+=== "Python"
 
-```python
-from toolapi import call
+    > [GitHub](https://github.com/mrx-org/toolapi-py) | [PyPI](https://pypi.org/project/toolapi/) | version `0.5.2` | License: AGPL-3.0
 
-def on_message(msg: str) -> bool:
-    print(f"[tool] {msg}")
-    return True  # return False to abort
+    Python bindings wrapping the Rust `toolapi` crate via [PyO3](https://pyo3.rs/) and [Maturin](https://www.maturin.rs/). Provides a native `call()` function for invoking tools, `run_server()` for writing tools in Python, and pure-Python dataclass wrappers for all Value types.
 
-result = call(
-    "wss://tool-phantomlib-flyio.fly.dev/tool",
-    {
-        "fov": [0.3, 0.3, 0.3],
-        "resolution": [128, 128, 1],
-    },
-    on_message,
-)
-```
+    ### Installation
 
-The function signature is:
+    ```bash
+    pip install toolapi
+    ```
 
-```python
-def call(
-    address: str,
-    input: Value,
-    on_message: Callable[[str], bool] | None = None,
-) -> Value
-```
+    !!! note
 
-- `address`: WebSocket URL of the tool server
-- `input`: Any Python object that maps to a ToolAPI `Value` (see below)
-- `on_message`: Optional callback for progress messages; return `False` to abort
+        The package is named `toolapi` on PyPI (not `toolapi-py`). It ships a compiled native extension for the platform -- no Rust toolchain needed at install time.
 
-The call blocks until the tool finishes. The GIL is released during the WebSocket communication, so other Python threads can run concurrently.
+    ### Calling a Tool
 
-### Writing a Tool (Server)
+    ```python
+    from toolapi import call
 
-```python
-from toolapi import run_server
+    def on_message(msg: str) -> bool:
+        print(f"[tool] {msg}")
+        return True  # return False to abort
 
-def my_tool(input, send_msg):
-    iterations = input["iterations"]
-    send_msg(f"Running {iterations} iterations...")
+    result = call(
+        "wss://tool-phantomlib-flyio.fly.dev/tool",
+        {
+            "fov": [0.3, 0.3, 0.3],
+            "resolution": [128, 128, 1],
+        },
+        on_message,
+    )
+    ```
 
-    # ... perform computation ...
+    The function signature is:
 
-    return {"result": 42.0}
+    ```python
+    def call(
+        address: str,
+        input: Value,
+        on_message: Callable[[str], bool] | None = None,
+    ) -> Value
+    ```
 
-run_server(my_tool)
-```
+    - `address`: WebSocket URL of the tool server
+    - `input`: Any Python object that maps to a ToolAPI `Value` (see below)
+    - `on_message`: Optional callback for progress messages; return `False` to abort
 
-The function signature is:
+    The call blocks until the tool finishes. The GIL is released during the WebSocket communication, so other Python threads can run concurrently.
 
-```python
-def run_server(
-    tool: Callable[[Any, MessageFn], Any],
-    index_html: str | None = None,
-) -> None
-```
+    ### Writing a Tool (Server)
 
-- `tool`: A callable `(input, send_msg) -> result`. Called for each client connection. `send_msg` sends a message string to the client and raises if the client requested abort.
-- `index_html`: Optional HTML string served at the `/` route.
+    ```python
+    from toolapi import run_server
 
-`run_server` starts a WebSocket server on `0.0.0.0:8080` and blocks until the process is killed. Can only be called once per process.
+    def my_tool(input, send_msg):
+        iterations = input["iterations"]
+        send_msg(f"Running {iterations} iterations...")
 
-### Value Type Mapping
+        # ... perform computation ...
 
-Primitive Python types map directly to ToolAPI values:
+        return {"result": 42.0}
 
-| Python    | ToolAPI Value                                       |
-| --------- | --------------------------------------------------- |
-| `None`    | `None`                                              |
-| `bool`    | `Bool`                                              |
-| `int`     | `Int`                                               |
-| `float`   | `Float`                                             |
-| `str`     | `Str`                                               |
-| `complex` | `Complex`                                           |
-| `bytes`   | `Bytes`                                             |
-| `dict`    | `Dict` (heterogeneous) or `TypedDict` (homogeneous) |
-| `list`    | `List` (heterogeneous) or `TypedList` (homogeneous) |
+    run_server(my_tool)
+    ```
 
-For homogeneous `list` and `dict` values, the Rust side automatically infers `TypedList` / `TypedDict` for efficient packing. Heterogeneous containers use `List` / `Dict`.
+    The function signature is:
 
-### Structured Types
+    ```python
+    def run_server(
+        tool: Callable[[Any, MessageFn], Any],
+        index_html: str | None = None,
+    ) -> None
+    ```
 
-For MRI-specific structured types, the `toolapi.value` module provides Python dataclasses that mirror the Rust types:
+    - `tool`: A callable `(input, send_msg) -> result`. Called for each client connection. `send_msg` sends a message string to the client and raises if the client requested abort.
+    - `index_html`: Optional HTML string served at the `/` route.
 
-```python
-from toolapi.value import Vec3, Vec4, Volume, PhantomTissue, SegmentedPhantom, InstantSeqEvent
-```
+    `run_server` starts a WebSocket server on `0.0.0.0:8080` and blocks until the process is killed. Can only be called once per process.
 
-#### `Vec3` / `Vec4`
+    ### Value Type Mapping
 
-```python
-v3 = Vec3([1.0, 2.0, 3.0])
-v4 = Vec4([0.0, 0.0, 0.0, 1.0])
-```
+    Primitive Python types map directly to ToolAPI values:
 
-#### `Volume`
+    | Python    | ToolAPI Value                                       |
+    | --------- | --------------------------------------------------- |
+    | `None`    | `None`                                              |
+    | `bool`    | `Bool`                                              |
+    | `int`     | `Int`                                               |
+    | `float`   | `Float`                                             |
+    | `str`     | `Str`                                               |
+    | `complex` | `Complex`                                           |
+    | `bytes`   | `Bytes`                                             |
+    | `dict`    | `Dict` (heterogeneous) or `TypedDict` (homogeneous) |
+    | `list`    | `List` (heterogeneous) or `TypedList` (homogeneous) |
 
-A 3D voxel volume with an affine transform:
+    For homogeneous `list` and `dict` values, the Rust side automatically infers `TypedList` / `TypedDict` for efficient packing. Heterogeneous containers use `List` / `Dict`.
 
-```python
-vol = Volume(
-    shape=[128, 128, 1],
-    affine=[
-        [0.002, 0.0, 0.0, -0.128],
-        [0.0, 0.002, 0.0, -0.128],
-        [0.0, 0.0, 0.002, 0.0],
-    ],
-    data=[0.0] * (128 * 128),  # TypedList inferred as Float
-)
-```
+    ### Structured Types
 
-#### `PhantomTissue`
+    For MRI-specific structured types, the `toolapi.value` module provides Python dataclasses that mirror the Rust types:
 
-A single tissue with density and off-resonance volumes, plus scalar relaxation parameters:
+    ```python
+    from toolapi.value import Vec3, Vec4, Volume, PhantomTissue, SegmentedPhantom, InstantSeqEvent
+    ```
 
-```python
-tissue = PhantomTissue(
-    density=density_volume,
-    db0=db0_volume,
-    t1=0.8,
-    t2=0.05,
-    t2dash=0.02,
-    adc=0.001,
-)
-```
+    #### `Vec3` / `Vec4`
 
-#### `SegmentedPhantom`
+    ```python
+    v3 = Vec3([1.0, 2.0, 3.0])
+    v4 = Vec4([0.0, 0.0, 0.0, 1.0])
+    ```
 
-A multi-tissue phantom with B1 transmit/receive maps:
+    #### `Volume`
 
-```python
-phantom = SegmentedPhantom(
-    tissues={"white_matter": wm_tissue, "gray_matter": gm_tissue},
-    b1_tx=[b1_tx_volume],
-    b1_rx=[b1_rx_volume],
-)
-```
+    A 3D voxel volume with an affine transform:
 
-#### `InstantSeqEvent`
+    ```python
+    vol = Volume(
+        shape=[128, 128, 1],
+        affine=[
+            [0.002, 0.0, 0.0, -0.128],
+            [0.0, 0.002, 0.0, -0.128],
+            [0.0, 0.0, 0.002, 0.0],
+        ],
+        data=[0.0] * (128 * 128),  # TypedList inferred as Float
+    )
+    ```
 
-A tagged union constructed via factory methods:
+    #### `PhantomTissue`
 
-```python
-pulse = InstantSeqEvent.Pulse(angle=3.14, phase=0.0)
-fid = InstantSeqEvent.Fid(kt=[0.0, 0.0, 0.0, 0.01])
-adc = InstantSeqEvent.Adc(phase=0.0)
-```
+    A single tissue with density and off-resonance volumes, plus scalar relaxation parameters:
 
----
+    ```python
+    tissue = PhantomTissue(
+        density=density_volume,
+        db0=db0_volume,
+        t1=0.8,
+        t2=0.05,
+        t2dash=0.02,
+        adc=0.001,
+    )
+    ```
 
-## JavaScript / WASM
+    #### `SegmentedPhantom`
 
-> [GitHub](https://github.com/mrx-org/toolapi-wasm) | [npm](https://www.npmjs.com/package/toolapi) | version `0.5.2` | License: AGPL-3.0
+    A multi-tissue phantom with B1 transmit/receive maps:
 
-A client-only WASM wrapper around the Rust `toolapi` crate, compiled via [wasm-pack](https://rustwasm.github.io/wasm-pack/) and [wasm-bindgen](https://rustwasm.github.io/wasm-bindgen/). Exposes a single async `call()` function for use in browser and other web-compatible environments.
+    ```python
+    phantom = SegmentedPhantom(
+        tissues={"white_matter": wm_tissue, "gray_matter": gm_tissue},
+        b1_tx=[b1_tx_volume],
+        b1_rx=[b1_rx_volume],
+    )
+    ```
 
-WASM tool servers are not planned -- tools should be hosted natively (in Rust or Python) and accessed from JavaScript as a client.
+    #### `InstantSeqEvent`
 
-### Installation
+    A tagged union constructed via factory methods:
 
-```bash
-npm install toolapi
-```
+    ```python
+    pulse = InstantSeqEvent.Pulse(angle=3.14, phase=0.0)
+    fid = InstantSeqEvent.Fid(kt=[0.0, 0.0, 0.0, 0.01])
+    adc = InstantSeqEvent.Adc(phase=0.0)
+    ```
 
-Or build from source:
+=== "JavaScript / WASM"
 
-```bash
-wasm-pack build --target web
-```
+    > [GitHub](https://github.com/mrx-org/toolapi-wasm) | [npm](https://www.npmjs.com/package/toolapi) | version `0.5.2` | License: AGPL-3.0
 
-### Calling a Tool
+    A client-only WASM wrapper around the Rust `toolapi` crate, compiled via [wasm-pack](https://rustwasm.github.io/wasm-pack/) and [wasm-bindgen](https://rustwasm.github.io/wasm-bindgen/). Exposes a single async `call()` function for use in browser and other web-compatible environments.
 
-```javascript
-import init, { call } from "toolapi"
+    WASM tool servers are not planned -- tools should be hosted natively (in Rust or Python) and accessed from JavaScript as a client.
 
-await init() // initialize WASM module
+    ### Installation
 
-const input = {
-  Dict: {
-    resolution: { List: [{ Int: 128 }, { Int: 128 }, { Int: 1 }] },
-    flip_angle: { Float: 0.26 },
-  },
-}
+    ```bash
+    npm install toolapi
+    ```
 
-const result = await call("wss://tool-example.fly.dev/tool", input, (msg) => {
-  console.log(`[tool] ${msg}`)
-  return true // return false to abort
-})
-```
+    Or build from source:
 
-The function signature is:
+    ```bash
+    wasm-pack build --target web
+    ```
 
-```typescript
-async function call(
-  addr: string,
-  input: Value,
-  on_message: (msg: string) => boolean,
-): Promise<Value>
-```
+    ### Calling a Tool
 
-- Returns a `Promise` that resolves to the result or rejects with an `Error`
-- The `on_message` callback is called for each progress message; return `false` to abort
-- If the callback throws or returns a falsy value, the tool is aborted
+    ```javascript
+    import init, { call } from "toolapi"
 
-### Value Serialization
+    await init() // initialize WASM module
 
-Values are serialized via `serde_wasm_bindgen`, using **tagged objects** where the key is the type name:
+    const input = {
+      Dict: {
+        resolution: { List: [{ Int: 128 }, { Int: 128 }, { Int: 1 }] },
+        flip_angle: { Float: 0.26 },
+      },
+    }
 
-| ToolAPI type | JavaScript representation                 |
-| ------------ | ----------------------------------------- |
-| `None`       | `{ "None": null }`                        |
-| `Bool`       | `{ "Bool": true }`                        |
-| `Int`        | `{ "Int": 42 }`                           |
-| `Float`      | `{ "Float": 3.14 }`                       |
-| `Str`        | `{ "Str": "hello" }`                      |
-| `Complex`    | `{ "Complex": { "re": 1.0, "im": 2.0 } }` |
-| `Bytes`      | `{ "Bytes": Uint8Array }`                  |
-| `Vec3`       | `{ "Vec3": [1.0, 2.0, 3.0] }`             |
-| `Dict`       | `{ "Dict": { "key": <Value>, ... } }`     |
-| `List`       | `{ "List": [<Value>, ...] }`              |
+    const result = await call("wss://tool-example.fly.dev/tool", input, (msg) => {
+      console.log(`[tool] ${msg}`)
+      return true // return false to abort
+    })
+    ```
 
-This tagged format matches Serde's default enum serialization and is used for both input and output.
+    The function signature is:
+
+    ```typescript
+    async function call(
+      addr: string,
+      input: Value,
+      on_message: (msg: string) => boolean,
+    ): Promise<Value>
+    ```
+
+    - Returns a `Promise` that resolves to the result or rejects with an `Error`
+    - The `on_message` callback is called for each progress message; return `false` to abort
+    - If the callback throws or returns a falsy value, the tool is aborted
+
+    ### Value Serialization
+
+    Values are serialized via `serde_wasm_bindgen`, using **tagged objects** where the key is the type name:
+
+    | ToolAPI type | JavaScript representation                  |
+    | ------------ | ------------------------------------------ |
+    | `None`       | `{ "None": null }`                         |
+    | `Bool`       | `{ "Bool": true }`                         |
+    | `Int`        | `{ "Int": 42 }`                            |
+    | `Float`      | `{ "Float": 3.14 }`                        |
+    | `Str`        | `{ "Str": "hello" }`                       |
+    | `Complex`    | `{ "Complex": { "re": 1.0, "im": 2.0 } }`  |
+    | `Bytes`      | `{ "Bytes": Uint8Array }`                   |
+    | `Vec3`       | `{ "Vec3": [1.0, 2.0, 3.0] }`              |
+    | `Dict`       | `{ "Dict": { "key": <Value>, ... } }`      |
+    | `List`       | `{ "List": [<Value>, ...] }`               |
+
+    This tagged format matches Serde's default enum serialization and is used for both input and output.
