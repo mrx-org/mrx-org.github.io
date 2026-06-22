@@ -21,7 +21,7 @@ MRX builds an ecosystem of open-source MRI simulation and analysis tools, culmin
 
 ## Demos & Examples
 
-<div class="grid cards" markdown>
+<div class="grid cards demo-cards" markdown>
 
 -   :material-monitor-shimmer:{ .lg .middle } **MRX Tool Demo**
 
@@ -55,7 +55,7 @@ MRX builds an ecosystem of open-source MRI simulation and analysis tools, culmin
 
 `MRX: Assistant` is built from independently developed components, each useful on its own for sequence development, hardware optimization, reconstruction network training, and more.
 
-<div class="grid cards" markdown>
+<div class="grid cards building-blocks-cards" markdown>
 
 -   :material-api:{ .lg .middle } **MRX: ToolAPI**
 
