@@ -2,58 +2,54 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://mrx-org.github.io/</loc>
-         <lastmod>2026-06-18</lastmod>
+         <lastmod>2026-06-22</lastmod>
     </url>
     <url>
          <loc>https://mrx-org.github.io/repo_overview/</loc>
-         <lastmod>2026-06-18</lastmod>
+         <lastmod>2026-06-22</lastmod>
     </url>
     <url>
          <loc>https://mrx-org.github.io/tags/</loc>
-         <lastmod>2026-06-18</lastmod>
-    </url>
-    <url>
-         <loc>https://mrx-org.github.io/apps/</loc>
-         <lastmod>2026-06-18</lastmod>
+         <lastmod>2026-06-22</lastmod>
     </url>
     <url>
          <loc>https://mrx-org.github.io/toolapi/</loc>
-         <lastmod>2026-06-18</lastmod>
+         <lastmod>2026-06-22</lastmod>
     </url>
     <url>
          <loc>https://mrx-org.github.io/toolapi/implementations/</loc>
-         <lastmod>2026-06-18</lastmod>
+         <lastmod>2026-06-22</lastmod>
     </url>
     <url>
          <loc>https://mrx-org.github.io/toolapi/values/</loc>
-         <lastmod>2026-06-18</lastmod>
+         <lastmod>2026-06-22</lastmod>
     </url>
     <url>
          <loc>https://mrx-org.github.io/tools/</loc>
-         <lastmod>2026-06-18</lastmod>
+         <lastmod>2026-06-22</lastmod>
     </url>
     <url>
          <loc>https://mrx-org.github.io/tools/conseq/</loc>
-         <lastmod>2026-06-18</lastmod>
+         <lastmod>2026-06-22</lastmod>
     </url>
     <url>
          <loc>https://mrx-org.github.io/tools/mr0sim/</loc>
-         <lastmod>2026-06-18</lastmod>
+         <lastmod>2026-06-22</lastmod>
     </url>
     <url>
          <loc>https://mrx-org.github.io/tools/phantomlib/</loc>
-         <lastmod>2026-06-18</lastmod>
+         <lastmod>2026-06-22</lastmod>
     </url>
     <url>
          <loc>https://mrx-org.github.io/tools/rapisim/</loc>
-         <lastmod>2026-06-18</lastmod>
+         <lastmod>2026-06-22</lastmod>
     </url>
     <url>
          <loc>https://mrx-org.github.io/tools/spinsim/</loc>
-         <lastmod>2026-06-18</lastmod>
+         <lastmod>2026-06-22</lastmod>
     </url>
     <url>
          <loc>https://mrx-org.github.io/tools/trajex/</loc>
-         <lastmod>2026-06-18</lastmod>
+         <lastmod>2026-06-22</lastmod>
     </url>
 </urlset>

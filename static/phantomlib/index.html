@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>phantomlib</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <div class="container">
+    <div class="card card-title">
+      <h1 class="highlight">PHANTOMLIB</h1>
+      <p>Numerical MRI phantom library with voxelized tissue models</p>
+      <div class="tags">
+        <span class="tag">Language: <a href="https://rust-lang.org/">Rust</a></span>
+        <span class="tag">Machines: <a href="https://fly.io/docs/about/pricing/#started-fly-machines">shared-4x-cpu@8192MB</a></span>
+        <span class="tag">Regions: <a href="https://fly.io/docs/reference/regions/">fra</a></span>
+        <span class="tag">Dashboard: <a href="https://fly.io/apps/tool-phantomlib">fly.io/apps/tool-phantomlib</a></span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>PHANTOMS</h2>
+      <div class="card-actions">
+        <div class="btn-well"><button class="btn btn-accent" id="btnRefresh">Refresh</button></div>
+        <input type="file" id="archiveFile" accept=".tar,.tar.gz,.tgz,.zip" hidden>
+        <div class="btn-well"><button class="btn" onclick="document.getElementById('archiveFile').click()">Select [.tar(.gz), .zip]</button></div>
+        <span class="file-label" id="fileLabel">no archive selected</span>
+        <div class="spacer"></div>
+        <div class="btn-well"><button class="btn btn-accent" id="btnUpload" disabled>Upload</button></div>
+      </div>
+      <div class="inset-card phantom-table-wrap" id="phantomListWrap">
+        <div class="placeholder-box" id="phantomPlaceholder"><h3>NO DATA</h3></div>
+        <table class="phantom-table" id="phantomTable" style="display:none">
+          <thead>
+            <tr><th>NAME</th><th>CREATED</th></tr>
+          </thead>
+          <tbody id="phantomTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h2>RETRIEVAL</h2>
+      <div class="params-row">
+        <div class="params-col">
+          <div class="param-group">
+            <span class="param-label">RES</span>
+            <input class="param-input" id="inputResX" type="number" min="1" max="512" value="72">
+            <input class="param-input" id="inputResY" type="number" min="1" max="512" value="87">
+            <input class="param-input" id="inputResZ" type="number" min="1" max="512" value="72">
+          </div>
+          <div class="param-group">
+            <span class="param-label">OFFSET</span>
+            <input class="param-input" id="inputOffX" type="number" step="1" value="-90">
+            <input class="param-input" id="inputOffY" type="number" step="1" value="-108.75">
+            <input class="param-input" id="inputOffZ" type="number" step="1" value="-90">
+          </div>
+        </div>
+        <div class="param-group affine-group">
+          <span class="param-label">AFFINE</span>
+          <div class="affine-grid">
+            <input class="param-input" id="affine00" type="number" step="0.1" value="2.5">
+            <input class="param-input" id="affine01" type="number" step="0.1" value="0">
+            <input class="param-input" id="affine02" type="number" step="0.1" value="0">
+            <input class="param-input" id="affine10" type="number" step="0.1" value="0">
+            <input class="param-input" id="affine11" type="number" step="0.1" value="2.5">
+            <input class="param-input" id="affine12" type="number" step="0.1" value="0">
+            <input class="param-input" id="affine20" type="number" step="0.1" value="0">
+            <input class="param-input" id="affine21" type="number" step="0.1" value="0">
+            <input class="param-input" id="affine22" type="number" step="0.1" value="2.5">
+          </div>
+        </div>
+        <div class="spacer"></div>
+        <span class="file-label" id="retrieveLabel">select phantom first</span>
+        <div class="btn-well"><button class="btn btn-accent" id="btnRetrieve" disabled>Retrieve</button></div>
+      </div>
+      <div class="inset-card result-wrap" id="resultContent">
+        <div class="placeholder-box" id="resultPlaceholder"><h3>NO DATA</h3></div>
+        <h3 id="resultTitle" style="display:none"></h3>
+        <table class="phantom-table result-table" id="resultTable" style="display:none">
+          <thead>
+            <tr><th>TISSUE</th><th>ADC</th><th>T1</th><th>T2</th><th>T2'</th></tr>
+          </thead>
+          <tbody id="resultTableBody"></tbody>
+        </table>
+        <div id="sliceControls" style="display:none">
+          <div class="slice-slider-row">
+            <span class="slice-label">SLICE Z</span>
+            <input type="range" class="slice-slider" id="sliceSlider" min="0" max="0" value="0">
+            <span class="slice-value" id="sliceValue">0 / 0</span>
+          </div>
+        </div>
+        <div class="tissue-grid" id="tissueImages"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>OUTPUT</h2>
+      <pre class="console output-console" id="console-output"></pre>
+    </div>
+  </div>
+  <div class="viewer-overlay" id="viewerOverlay">
+    <div class="viewer-pane card">
+      <div class="viewer-header">
+        <div class="viewer-header-left">
+          <h2>VIEWER</h2>
+          <span class="viewer-subtitle" id="viewerSubtitle"></span>
+        </div>
+        <div class="btn-well viewer-btn-well"><button class="btn viewer-btn" id="viewerClose"></button></div>
+      </div>
+      <pre class="console viewer-console" id="viewerContent"></pre>
+    </div>
+  </div>
+  <script src="visuals.js"></script>
+  <script type="module" src="pipeline.js"></script>
+</body>
+
+</html>

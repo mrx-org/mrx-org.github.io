@@ -1,0 +1,139 @@
+/* ── Custom brand palette ── */
+[data-md-color-primary="custom"] {
+  --md-primary-fg-color:        #0d1e35;
+  --md-primary-fg-color--light: #1a3468;
+  --md-primary-fg-color--dark:  #07111f;
+  --md-primary-bg-color:        #fff;
+  --md-primary-bg-color--light: hsla(0, 0%, 100%, .7);
+}
+
+[data-md-color-accent="custom"] {
+  --md-accent-fg-color:              #e86745;
+  --md-accent-fg-color--transparent: rgba(232, 103, 69, .1);
+  --md-accent-bg-color:              #fff;
+  --md-accent-bg-color--light:       hsla(0, 0%, 100%, .7);
+  /* Without this, links fall back to the primary color (dark navy) */
+  --md-typeset-a-color:              #e86745;
+}
+
+/* ── Dark mode contrast: buttons and links ──
+   .md-button text uses --md-primary-fg-color (#0d1e35), which is
+   invisible on dark card backgrounds. Switch to the default fg instead. */
+[data-md-color-scheme="slate"] .md-button:not(.md-button--primary) {
+  color: var(--md-default-fg-color);
+  border-color: var(--md-default-fg-color--light);
+}
+
+/* ── Hero ── */
+.hero {
+  text-align: center;
+  padding: 2.5rem 1rem 3rem;
+}
+
+.hero-logo {
+  display: block;
+  width: 88px;
+  height: 88px;
+  margin: 0 auto 1.75rem;
+}
+
+.hero h1 {
+  font-size: 3rem;
+  font-weight: 700;
+  letter-spacing: -.025em;
+  margin: 0 0 .5rem;
+  border: none;
+}
+
+.hero p {
+  font-size: 1.05rem;
+  max-width: 680px;
+  margin: 0 auto .9rem;
+  line-height: 1.75;
+}
+
+.hero .md-button {
+  margin: .75rem .4rem 0;
+  font-size: 1rem;
+  padding: .65em 1.65em;
+}
+
+@media (max-width: 600px) {
+  .hero h1 { font-size: 2.2rem; }
+
+  .hero .md-button {
+    display: block;
+    margin: .5rem auto 0;
+    max-width: 16rem;
+  }
+}
+
+/* ── Card background images ──
+   Gradient + image stacked as a single background-image value so no
+   pseudo-element or z-index juggling is needed.
+   CSS custom-property overrides cascade into all child elements,
+   turning text, icons, and the hr white without needing !important. */
+
+.demo-cards > ul > li,
+.building-blocks-cards > ul > li {
+  background-size: cover;
+  background-position: center;
+  min-height: 180px;
+  --md-default-fg-color:          rgba(255, 255, 255, .87);
+  --md-default-fg-color--light:   rgba(255, 255, 255, .54);
+  --md-default-fg-color--lighter: rgba(255, 255, 255, .32);
+  --md-typeset-a-color:           rgba(255, 255, 255, .9);
+  color: rgba(255, 255, 255, .87);
+}
+
+.demo-cards > ul > li hr,
+.building-blocks-cards > ul > li hr {
+  border-color: rgba(255, 255, 255, .25);
+}
+
+.demo-cards > ul > li .md-button,
+.building-blocks-cards > ul > li .md-button {
+  color: rgba(255, 255, 255, .9);
+  border-color: rgba(255, 255, 255, .5);
+}
+
+.demo-cards > ul > li .md-button:hover,
+.building-blocks-cards > ul > li .md-button:hover {
+  background: rgba(255, 255, 255, .15);
+  border-color: rgba(255, 255, 255, .8);
+  color: #fff;
+}
+
+.demo-cards > ul > li:nth-child(1) {
+  background-image:
+    linear-gradient(rgba(0, 0, 0, .52), rgba(0, 0, 0, .52)),
+    url(../assets/card-mrx_tool_demo.png);
+}
+.demo-cards > ul > li:nth-child(2) {
+  background-image:
+    linear-gradient(rgba(0, 0, 0, .52), rgba(0, 0, 0, .52)),
+    url(../assets/card-phantomlib.png);
+}
+.demo-cards > ul > li:nth-child(3) {
+  background-image:
+    linear-gradient(rgba(0, 0, 0, .52), rgba(0, 0, 0, .52)),
+    url(../assets/card-colab_demo.png);
+}
+.building-blocks-cards > ul > li:nth-child(1) {
+  background-image:
+    linear-gradient(rgba(0, 0, 0, .52), rgba(0, 0, 0, .52)),
+    url(../assets/card-toolapi.jpg);
+}
+.building-blocks-cards > ul > li:nth-child(2) {
+  background-image:
+    linear-gradient(rgba(0, 0, 0, .52), rgba(0, 0, 0, .52)),
+    url(../assets/card-tools.png);
+}
+
+/* ── Funding footnote ── */
+.funding-note {
+  color: var(--md-default-fg-color--light);
+  font-size: .8rem;
+  margin-top: 2.5rem;
+  text-align: center;
+}
