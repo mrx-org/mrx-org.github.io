@@ -1,0 +1,77 @@
+/* ── Custom brand palette ── */
+[data-md-color-primary="custom"] {
+  --md-primary-fg-color:        #0d1e35;
+  --md-primary-fg-color--light: #1a3468;
+  --md-primary-fg-color--dark:  #07111f;
+  --md-primary-bg-color:        #fff;
+  --md-primary-bg-color--light: hsla(0, 0%, 100%, .7);
+}
+
+[data-md-color-accent="custom"] {
+  --md-accent-fg-color:              #e86745;
+  --md-accent-fg-color--transparent: rgba(232, 103, 69, .1);
+  --md-accent-bg-color:              #fff;
+  --md-accent-bg-color--light:       hsla(0, 0%, 100%, .7);
+  /* Without this, links fall back to the primary color (dark navy) */
+  --md-typeset-a-color:              #e86745;
+}
+
+/* ── Dark mode contrast: buttons and links ──
+   .md-button text uses --md-primary-fg-color (#0d1e35), which is
+   invisible on dark card backgrounds. Switch to the default fg instead. */
+[data-md-color-scheme="slate"] .md-button:not(.md-button--primary) {
+  color: var(--md-default-fg-color);
+  border-color: var(--md-default-fg-color--light);
+}
+
+/* ── Hero ── */
+.hero {
+  text-align: center;
+  padding: 2.5rem 1rem 3rem;
+}
+
+.hero-logo {
+  display: block;
+  width: 88px;
+  height: 88px;
+  margin: 0 auto 1.75rem;
+}
+
+.hero h1 {
+  font-size: 3rem;
+  font-weight: 700;
+  letter-spacing: -.025em;
+  margin: 0 0 .5rem;
+  border: none;
+}
+
+.hero p {
+  font-size: 1.05rem;
+  max-width: 680px;
+  margin: 0 auto .9rem;
+  line-height: 1.75;
+}
+
+.hero .md-button {
+  margin: .75rem .4rem 0;
+  font-size: 1rem;
+  padding: .65em 1.65em;
+}
+
+@media (max-width: 600px) {
+  .hero h1 { font-size: 2.2rem; }
+
+  .hero .md-button {
+    display: block;
+    margin: .5rem auto 0;
+    max-width: 16rem;
+  }
+}
+
+/* ── Funding footnote ── */
+.funding-note {
+  color: var(--md-default-fg-color--light);
+  font-size: .8rem;
+  margin-top: 2.5rem;
+  text-align: center;
+}

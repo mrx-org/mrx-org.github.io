@@ -2,35 +2,77 @@
 title: Welcome
 ---
 
-!!! summary "Examples"
+<div class="hero" markdown>
 
-    - Web-app demonstrating MRX without installation: <a href="https://mrx-org.github.io/anyfield/" data-router-ignore><strong>No-field Scanner</strong></a>
-    - Demo of currently available simulations: <a href="/static/demo_sim/" data-router-ignore><strong>MRX Tool Demo</strong></a>
-    - Upload and view available phantoms <a href="/static/phantomlib/" data-router-ignore><strong>Phantomlib</strong></a>
-    - How to use the `toolapi` from python: <a href="https://colab.research.google.com/github/mrx-org/mrx-org.github.io/blob/main/notebooks/toolapi_simulation_demo.ipynb"><strong>Colab Notebook</strong></a>
+![MRX](assets/favicon.svg){ .hero-logo }
+
+# MRX
+
+**Physics-based MRI simulation and AI-powered clinical assistance.**
+
+MRX builds an ecosystem of open-source MRI simulation and analysis tools, culminating in `MRX: Assistant` — an intelligent AI assistant supporting clinic personnel with MR measurements, backed by a real physics world model.
+
+[Try Anyfield Scanner ›](https://mrx-org.github.io/anyfield/){ .md-button .md-button--primary }
+[Explore the docs ›](toolapi/index.md){ .md-button }
+
+</div>
 
 ---
 
-# MRX - MR Expertise
+## Demos & Examples
 
-Funded by [START-interaktiv](https://www.interaktive-technologien.de/projekte/mrx) (BMFTR, February 2026 - January 2029). 
+<div class="grid cards" markdown>
 
-> **3 - year - goal of MRX**
->
-> Creating `MRX: Assistant`, an intelligent AI assistant, supporting clinic personell with MR measurements.
-> An LLM allows easy interaction without prior training.
-> A deep integration with the scanner means full data insight and quick interaction with the user.
-> An extensive, physics based world model delivers facts instead of hallucinations.
+-   :material-monitor-shimmer:{ .lg .middle } **MRX Tool Demo**
 
-The necessary tools for this project will also form the foundation of future applications of MRX:
-Sequence development, optimizing for low-cost hardware, training of new reconstruction networks and more.
+    ---
 
+    Interactive browser demo of the currently available MRI simulation tools. No installation required.
+
+    <a href="/static/demo_sim/" class="md-button" data-router-ignore>Open Demo ›</a>
+
+-   :material-head-cog:{ .lg .middle } **Phantom Library**
+
+    ---
+
+    Upload and browse available MRI phantoms — any slice, orientation, and resolution via an affine matrix.
+
+    <a href="/static/phantomlib/" class="md-button" data-router-ignore>View Phantoms ›</a>
+
+-   :material-notebook-outline:{ .lg .middle } **Colab Notebook**
+
+    ---
+
+    Step-by-step Python walkthrough of the ToolAPI for MRI simulation workflows.
+
+    [Open in Colab ›](https://colab.research.google.com/github/mrx-org/mrx-org.github.io/blob/main/notebooks/toolapi_simulation_demo.ipynb){ .md-button }
+
+</div>
+
+---
 
 ## Building Blocks
 
-The foundation of `MRX: Assistant` consists of various building blocks.
-These are developed independent of each other.
-This allows to use them to construct new products which go beyond the target of an assistant.
+`MRX: Assistant` is built from independently developed components, each useful on its own for sequence development, hardware optimization, reconstruction network training, and more.
 
-- [`MRX: ToolAPI`](toolapi/index.md): Connect any application with any MRX world-model tool, easily. Allows quick experimentation: comparing implementations, testing tools in various scenarios. Developed first as it helps with the development of the other building blocks.
-- [Tools](tools/index.md): Tools built in Rust and Python, using the `MRX: ToolAPI`.
+<div class="grid cards" markdown>
+
+-   :material-api:{ .lg .middle } **MRX: ToolAPI**
+
+    ---
+
+    A cross-language framework connecting MRI simulation tools with any client — web apps, Python scripts, or LLM agents. Strongly-typed, transport-agnostic, and easy to extend.
+
+    [Documentation ›](toolapi/index.md){ .md-button }
+
+-   :material-wrench:{ .lg .middle } **Simulation Tools**
+
+    ---
+
+    Physics-based tools built in Rust and Python: phantom loading, sequence conversion, trajectory extraction, and multiple MRI simulators.
+
+    [Browse tools ›](tools/index.md){ .md-button }
+
+</div>
+
+<p class="funding-note">Funded by <a href="https://www.interaktive-technologien.de/projekte/mrx">START-interaktiv</a> (BMFTR, February 2026 – January 2029).</p>

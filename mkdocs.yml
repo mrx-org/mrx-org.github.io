@@ -2,22 +2,25 @@ site_name: MRX
 site_url: https://mrx-org.github.io/
 repo_url: https://github.com/mrx-org
 
+extra_css:
+  - stylesheets/extra.css
+
 theme:
   name: material
-  logo: assets/logo.png
-  favicon: assets/logo.png
+  logo: assets/favicon.png
+  favicon: assets/favicon.png
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: indigo        # an dein Logo/Brand anpassen
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/weather-night
         name: Dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/weather-sunny
         name: Light mode
@@ -50,6 +53,9 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.tabbed:
       alternate_style: true    # Python/TS/Rust-Tabs
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
@@ -78,5 +84,5 @@ nav:
       - Rapid MRI Simulation: tools/rapisim.md
       - Spin Simulation: tools/spinsim.md
       - Trajectory Extractor: tools/trajex.md
-  - Any-field Scanner: https://mrx-org.github.io/anyfield/
+  - Anyfield Scanner: https://mrx-org.github.io/anyfield/
   - Tags: tags.md
