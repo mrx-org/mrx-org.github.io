@@ -16,7 +16,7 @@ The **Rust crate** is the single source of truth -- it defines all [value types]
 | -------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------- |
 | [Rust](#rust)                          | [toolapi on crates.io](https://crates.io/crates/toolapi)          | Core: defines types, protocol, server + client |
 | [Python](#python)                      | [toolapi on PyPI](https://pypi.org/project/toolapi/)              | Server + client with idiomatic Python classes  |
-| [JavaScript / WASM](#javascript--wasm) | [toolapi on npm](https://www.npmjs.com/package/toolapi)           | Client-only, async `call()` for web apps       |
+| [JavaScript / WASM](#javascript-wasm) | [toolapi on npm](https://www.npmjs.com/package/toolapi)           | Client-only, async `call()` for web apps       |
 
 ---
 

@@ -13,7 +13,7 @@ ToolAPI is the foundation of the MRX ecosystem: all [tools](../tools/index.md) a
 
 ### Tool
 
-A **tool** is a standalone server program. It receives a [Value](./values/index.md) as input, performs its computation (optionally reporting progress via messages), and returns a [Value](values) as output. Tools are currently hosted on [Fly.io](https://fly.io/) but can as easily be run locally (typically only requiring a Python or Rust installation).
+A **tool** is a standalone server program. It receives a [Value](values/index.md) as input, performs its computation (optionally reporting progress via messages), and returns a [Value](values/index.md) as output. Tools are currently hosted on [Fly.io](https://fly.io/) but can as easily be run locally (typically only requiring a Python or Rust installation).
 
 Tools are language-agnostic: they can be written in any language that has a ToolAPI [implementation](./implementations.md). Currently, tools are written in Rust and Python.
 
@@ -38,7 +38,7 @@ A **client** is any environment that invokes tools. Examples include:
 - A Jupyter notebook for interactive MR experimentation
 - An MCP shim exposing tool capabilities to LLMs
 
-From the client's perspective, invoking a tool is a single function call: `call(address, input, on_message)`. The limited, well-defined set of [value types](./values/index.md) ensures that tools with similar purposes can be exchanged freely, even if written independently by different people.
+From the client's perspective, invoking a tool is a single function call: `call(address, input, on_message)`. The limited, well-defined set of [value types](values/index.md) ensures that tools with similar purposes can be exchanged freely, even if written independently by different people.
 
 ### Connection
 
@@ -68,5 +68,5 @@ The client's `on_message` callback receives each `ToolMsg` and can return `false
 
 ## Further Reading
 
-- [Value Types](./values/index.md) -- the canonical data types exchanged between clients and tools
-- [Implementations](./implementations.md) -- language-specific bindings (Rust, Python, JavaScript/WASM)
+- [Value Types](values/index.md) -- the canonical data types exchanged between clients and tools
+- [Implementations](implementations.md) -- language-specific bindings (Rust, Python, JavaScript/WASM)

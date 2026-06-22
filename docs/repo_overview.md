@@ -10,7 +10,7 @@ All repositories are hosted in the [mrx-org](https://github.com/mrx-org/) GitHub
 
 # ToolAPI
 
-Language implementations of the [MRX ToolAPI](toolapi/index).
+Language implementations of the [MRX ToolAPI](toolapi/index.md).
 
 | Project                                                                                                                                                                                              | Description                               |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
@@ -30,7 +30,7 @@ MRX organization repositories for documentation and project management.
 
 # Tools
 
-Building blocks for MRX apps. These tools are built using the [MRX ToolAPI](toolapi/index) and provide different functionalities, which have to be connected by apps or scripts.
+Building blocks for MRX apps. These tools are built using the [MRX ToolAPI](toolapi/index.md) and provide different functionalities, which have to be connected by apps or scripts.
 
 | Project | Description |
 | ------- | ----------- |
