@@ -8,12 +8,12 @@
 }
 
 [data-md-color-accent="custom"] {
-  --md-accent-fg-color:              #e86745;
+  --md-accent-fg-color:              #4591e8;
   --md-accent-fg-color--transparent: rgba(232, 103, 69, .1);
   --md-accent-bg-color:              #fff;
   --md-accent-bg-color--light:       hsla(0, 0%, 100%, .7);
   /* Without this, links fall back to the primary color (dark navy) */
-  --md-typeset-a-color:              #e86745;
+  --md-typeset-a-color:              #4591e8;
 }
 
 /* ── Dark mode contrast: buttons and links ──
