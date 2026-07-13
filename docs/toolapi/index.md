@@ -33,7 +33,7 @@ sequenceDiagram
 
 A **client** is any environment that invokes tools. Examples include:
 
-- A web application like the [No-field Scanner](https://mrx-org.github.io/nofield/)
+- A web application like the [Any-field Scanner](https://mrx-org.github.io/anyfield/)
 - A Python script optimizing a sequence using simulation tools
 - A Jupyter notebook for interactive MR experimentation
 - An MCP shim exposing tool capabilities to LLMs
