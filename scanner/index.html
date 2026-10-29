@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MRX scanner session</title>
+<link rel="icon" href="../assets/favicon.png">
+<!--
+  The page a scanner operator creates a session on. It logs in to the MRX
+  gateway (the same OAuth flow as the gateway's /keys page, pointed at the
+  gateway instead of this origin), asks POST /scanner/sessions for a session,
+  fills the values it gets back into mrx_scanner.py next to this page and hands
+  that out as a download. Nothing is kept: closing the page loses the token, and
+  the operator simply makes a new session.
+
+  mrx_scanner.py is a copy of src/mcp_gateway/scanner_client.py in the
+  mcp-gateway repo, where it is developed and tested - copy it here to ship a
+  change. The gateway's /scanner/new redirects here.
+-->
+<style>
+  :root {
+    --bg: #fff; --fg: #1d2330; --muted: #5b6474; --code: #eef1f6;
+    --primary: #0d1e35; --accent: #4591e8; --error: #c33;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1e2129; --fg: #e3e6ec; --muted: #9aa3b2; --code: #2a2e38; --primary: #4591e8; --error: #f07070; }
+  }
+  body {
+    font: 16px/1.6 Inter, system-ui, sans-serif; background: var(--bg); color: var(--fg);
+    max-width: 42rem; margin: 0 auto; padding: 2rem 1rem 4rem;
+  }
+  header { display: flex; align-items: center; gap: .6rem; margin-bottom: 2rem; }
+  header img { width: 32px; height: 32px; }
+  header a { color: inherit; text-decoration: none; font-weight: 700; letter-spacing: .04em; }
+  h1 { font-size: 1.6rem; margin: 0 0 .5rem; }
+  a { color: var(--accent); }
+  code, pre { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .9em; background: var(--code); border-radius: 4px; overflow-wrap: anywhere; }
+  code { padding: .1rem .3rem; }
+  pre { padding: .75rem; white-space: pre-wrap; }
+  button {
+    font: inherit; font-weight: 600; padding: .45rem 1.1rem; margin: .5rem .5rem 0 0; cursor: pointer;
+    color: #fff; background: var(--primary); border: 0; border-radius: 4px;
+  }
+  button:hover { filter: brightness(1.15); }
+  .muted { color: var(--muted); font-size: .9rem; }
+  .error { color: var(--error); }
+</style>
+</head>
+<body>
+<header><img src="../assets/favicon.svg" alt=""><a href="/">MRX</a></header>
+<h1>Scanner session</h1>
+<p>Connects a scanner to the MRX gateway. Creating a session downloads
+<code>mrx_scanner.py</code>, which runs on the PC next to the scanner (Python 3.8
+or newer with numpy), and shows the scan token to give to the people who may
+measure on it. A session ends 4 hours after it was last used.</p>
+<div id="app"></div>
+<p class="muted" id="gateway"></p>
+<script>
+// The gateway this page talks to. Only the production one, or one on this
+// machine (`?gateway=http://127.0.0.1:8000`, what a local gateway's
+// /scanner/new redirects to): the script would otherwise take its jobs from
+// whatever server a link named.
+const DEFAULT_GATEWAY = "https://mrx-org--mcp-gateway-func.modal.run";
+const SCRIPT = "mrx_scanner.py";
+const redirectUri = location.origin + location.pathname;
+const app = document.getElementById("app");
+let gateway = DEFAULT_GATEWAY;
+let token = null;
+
+const b64url = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes)))
+  .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const random = () => b64url(crypto.getRandomValues(new Uint8Array(32)));
+const text = s => { const e = document.createElement("span"); e.textContent = s; return e.innerHTML; };
+
+function checkGateway(url) {
+  const u = new URL(url);
+  const local = u.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(u.hostname);
+  if (u.origin !== DEFAULT_GATEWAY && !local) throw new Error("not an MRX gateway: " + url);
+  return u.origin;
+}
+
+async function login() {
+  const reg = await fetch(gateway + "/register", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      client_name: "MRX scanner page",
+      redirect_uris: [redirectUri],
+      grant_types: ["authorization_code"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    }),
+  });
+  if (!reg.ok) throw new Error("registration failed: " + await reg.text());
+  const clientId = (await reg.json()).client_id;
+
+  const verifier = random(), state = random();
+  sessionStorage.setItem("mrx-login", JSON.stringify({gateway, clientId, verifier, state}));
+  const challenge = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
+  location = gateway + "/authorize?" + new URLSearchParams({
+    response_type: "code", client_id: clientId, redirect_uri: redirectUri,
+    code_challenge: challenge, code_challenge_method: "S256", state,
+  });
+}
+
+// Back from the gateway with a `code`: the login state says which gateway
+async function finishLogin(params) {
+  history.replaceState(null, "", location.pathname);
+  const saved = JSON.parse(sessionStorage.getItem("mrx-login") || "null");
+  sessionStorage.removeItem("mrx-login");
+  if (!saved || saved.state !== params.get("state")) throw new Error("login state mismatch, try again");
+  gateway = checkGateway(saved.gateway);
+
+  const res = await fetch(gateway + "/token", {
+    method: "POST",
+    body: new URLSearchParams({
+      grant_type: "authorization_code", code: params.get("code"),
+      redirect_uri: redirectUri, client_id: saved.clientId, code_verifier: saved.verifier,
+    }),
+  });
+  if (!res.ok) throw new Error("login failed: " + await res.text());
+  token = (await res.json()).access_token;
+}
+
+// A gateway without OAuth (local development) has no metadata and no login
+async function authEnabled() {
+  const res = await fetch(gateway + "/.well-known/oauth-authorization-server");
+  if (res.status === 404) return false;
+  if (!res.ok) throw new Error("gateway answered " + res.status);
+  return true;
+}
+
+// Each value replaces its quoted placeholder as a JSON string, which is also a
+// valid Python string literal, so nothing in a value can break out of it - the
+// same as `scanner.render_script` in the gateway.
+async function renderScript(values) {
+  const res = await fetch(SCRIPT, {cache: "no-cache"});
+  if (!res.ok) throw new Error(SCRIPT + ": " + res.status);
+  let source = await res.text();
+  for (const [name, value] of Object.entries(values)) {
+    const placeholder = `"__MRX_${name}__"`;
+    if (!source.includes(placeholder)) throw new Error(placeholder + " is missing from " + SCRIPT);
+    source = source.replace(placeholder, () => JSON.stringify(value));
+  }
+  return source;
+}
+
+function offerLogin() {
+  app.innerHTML = `<button id="login">Log in with GitHub</button>`;
+  document.getElementById("login").onclick = run(login);
+}
+
+function offer() {
+  app.innerHTML = `<button id="create">Create scanner session</button>`;
+  document.getElementById("create").onclick = run(create);
+}
+
+async function create() {
+  const headers = token ? {Authorization: "Bearer " + token} : {};
+  const res = await fetch(gateway + "/scanner/sessions", {method: "POST", headers});
+  if (!res.ok) throw new Error("POST /scanner/sessions: " + res.status + " " + await res.text());
+  const s = await res.json();
+  const script = await renderScript(s.values);
+
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([script], {type: "text/x-python"}));
+  link.download = s.file_name;
+  link.click();
+
+  app.innerHTML =
+    `<p><b>${text(s.file_name)}</b> was downloaded. Run it on the scanner PC:</p>
+     <pre>python ${text(s.file_name)}</pre>
+     <p><b>Scan token</b> - give it to whoever may measure on this scanner:</p>
+     <pre>${text(s.token)}</pre>
+     <p>They measure with <code>scan(sequence="&lt;hash of the .seq&gt;", scanner="${text(s.token)}")</code>.
+     The script prints the token too.</p>
+     <button id="again">Create another session</button>`;
+  document.getElementById("again").onclick = run(create);
+}
+
+const run = f => async () => {
+  try { await f(); }
+  catch (e) { app.insertAdjacentHTML("beforeend", `<p class="error">${text(e.message)}</p>`); }
+};
+
+const params = new URLSearchParams(location.search);
+run(async () => {
+  if (params.has("error")) {
+    history.replaceState(null, "", location.pathname);
+    const saved = JSON.parse(sessionStorage.getItem("mrx-login") || "null");
+    sessionStorage.removeItem("mrx-login");
+    if (saved) gateway = checkGateway(saved.gateway);
+    offerLogin();
+    throw new Error(params.get("error_description") || params.get("error"));
+  }
+  if (params.has("code")) {
+    await finishLogin(params);
+  } else if (params.has("gateway")) {
+    gateway = checkGateway(params.get("gateway"));
+  }
+  if (gateway !== DEFAULT_GATEWAY) {
+    document.getElementById("gateway").textContent = "Gateway: " + gateway;
+  }
+  if (token || !await authEnabled()) offer();
+  else offerLogin();
+})();
+</script>
+</body>
+</html>
