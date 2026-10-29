@@ -49,6 +49,8 @@ MRX builds an ecosystem of open-source MRI simulation and analysis tools, culmin
 
 </div>
 
+Operating an MRI scanner? <a href="/scanner/" data-router-ignore>Start a new scanner session ›</a> to let MRX measure on it.
+
 ---
 
 ## Building Blocks
