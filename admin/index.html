@@ -1,0 +1,530 @@
+<!doctype html>
+<!--
+  The MRX gateway's admin dashboard. A static page: it logs in to the gateway
+  (the same flow as `src/mcp_gateway/pages.py`, pointed at the gateway rather
+  than at its own origin) and calls the gateway's `/admin/api/*` routes with
+  the token it got - see `src/mcp_gateway/admin.py`.
+
+  Meant for mrx-org.github.io next to the scanner session page. It talks to
+  the production gateway, to the gateway that serves it (`/admin`, until it
+  moves), or to a loopback one named in `?gateway=` - and to nothing else.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MRX admin</title>
+<style>
+  :root {
+    --bg: #fff; --fg: #1d1d1f; --muted: #6b6b70; --line: #e3e3e8; --panel: #f6f6f8;
+    --accent: #2d6cdf; --ok: #1f8a4c; --warn: #b26b00; --err: #c62f2f; --raw: #7a3fc4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151517; --fg: #e8e8ea; --muted: #9a9aa2; --line: #2c2c31; --panel: #1d1d21;
+      --accent: #6c9cff; --ok: #4cc27f; --warn: #f0a83a; --err: #ff6b6b; --raw: #b48cff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 1rem; padding: .75rem 1rem; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 1.05rem; margin: 0; }
+  header .gateway { color: var(--muted); font-size: .85rem; }
+  header .me { margin-left: auto; display: flex; align-items: center; gap: .5rem; }
+  .avatar { width: 22px; height: 22px; border-radius: 50%; vertical-align: middle; background: var(--line); }
+  main { padding: 1rem; }
+  nav { display: flex; gap: .25rem; border-bottom: 1px solid var(--line); margin-bottom: 1rem; overflow-x: auto; }
+  nav button { border: 0; background: none; padding: .5rem .9rem; border-bottom: 2px solid transparent; color: var(--muted); cursor: pointer; font: inherit; }
+  nav button.active { color: var(--fg); border-bottom-color: var(--accent); }
+  .bar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .75rem; }
+  input, select, button { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: .3rem .55rem; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .muted { color: var(--muted); }
+  .error { color: var(--err); }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: .35rem .55rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; color: var(--muted); white-space: nowrap; position: sticky; top: 0; background: var(--bg); }
+  th.sortable { cursor: pointer; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.nowrap, .time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .chip { display: inline-block; padding: 0 .4rem; margin: 0 .25rem .2rem 0; border-radius: 4px; background: var(--panel); border: 1px solid var(--line); font-size: .85em; }
+  .lvl { font-weight: 600; font-size: .8em; }
+  .lvl-DEBUG { color: var(--muted); } .lvl-INFO { color: var(--ok); }
+  .lvl-WARNING { color: var(--warn); } .lvl-ERROR, .lvl-CRITICAL { color: var(--err); }
+  .lvl-RAW { color: var(--raw); }
+  tr.log { cursor: pointer; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+  tr.log:hover { background: var(--panel); }
+  tr.log td { border-bottom-color: transparent; padding-top: .15rem; padding-bottom: .15rem; }
+  tr.log td { white-space: nowrap; }
+  tr.log td.msg { white-space: pre-wrap; overflow-wrap: anywhere; }
+  tr.detail pre { margin: 0 0 .5rem; padding: .6rem; background: var(--panel); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+  a.who { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--muted); cursor: pointer; }
+  .center { max-width: 32rem; margin: 4rem auto; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MRX admin</h1>
+  <span class="gateway" id="gateway"></span>
+  <span class="me" id="me"></span>
+</header>
+<main id="app"><div class="center"><button class="primary" id="login">Log in with GitHub</button></div></main>
+
+<script>
+const PRODUCTION = "https://mrx-org--mcp-gateway-func.modal.run";
+const params = new URLSearchParams(location.search);
+const isLoopback = host => ["127.0.0.1", "localhost", "[::1]", "::1"].includes(host);
+
+// Which gateway to talk to. Chosen before the login and kept across its
+// redirect, which comes back to this page without `?gateway=`.
+function pickGateway() {
+  if (params.has("code")) {
+    const saved = sessionStorage.getItem("mrx-admin-gateway");
+    if (saved) return saved;
+  }
+  const named = params.get("gateway");
+  if (named) {
+    try {
+      const url = new URL(named);
+      if (isLoopback(url.hostname)) return url.origin;
+    } catch {}
+  }
+  // Served by a gateway itself, at its `/admin` - not by just any local web
+  // server, which is a page being tried out against production
+  if (location.pathname.replace(/\/$/, "") === "/admin"
+      && (location.origin === PRODUCTION || isLoopback(location.hostname))) return location.origin;
+  return PRODUCTION;
+}
+const gateway = pickGateway();
+sessionStorage.setItem("mrx-admin-gateway", gateway);
+document.getElementById("gateway").textContent = new URL(gateway).host;
+
+// --- Login: a copy of `pages.LOGIN_SCRIPT`, with the gateway in place of `origin`
+const redirectUri = location.origin + location.pathname;
+let token = null;
+
+const b64url = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes)))
+  .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const random = () => b64url(crypto.getRandomValues(new Uint8Array(32)));
+const text = s => { const e = document.createElement("span"); e.textContent = s ?? ""; return e.innerHTML; };
+
+async function login(clientName) {
+  const reg = await fetch(gateway + "/register", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      client_name: clientName,
+      redirect_uris: [redirectUri],
+      grant_types: ["authorization_code"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    }),
+  });
+  if (!reg.ok) throw new Error("registration failed: " + await reg.text());
+  const clientId = (await reg.json()).client_id;
+
+  const verifier = random(), state = random();
+  sessionStorage.setItem("mrx-login", JSON.stringify({clientId, verifier, state}));
+  const challenge = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
+  location = gateway + "/authorize?" + new URLSearchParams({
+    response_type: "code", client_id: clientId, redirect_uri: redirectUri,
+    code_challenge: challenge, code_challenge_method: "S256", state,
+  });
+}
+
+async function finishLogin(params) {
+  history.replaceState(null, "", location.pathname);
+  const saved = JSON.parse(sessionStorage.getItem("mrx-login") || "null");
+  sessionStorage.removeItem("mrx-login");
+  if (!saved || saved.state !== params.get("state")) throw new Error("login state mismatch, try again");
+
+  const res = await fetch(gateway + "/token", {
+    method: "POST",
+    body: new URLSearchParams({
+      grant_type: "authorization_code", code: params.get("code"),
+      redirect_uri: redirectUri, client_id: saved.clientId, code_verifier: saved.verifier,
+    }),
+  });
+  if (!res.ok) throw new Error("login failed: " + await res.text());
+  token = (await res.json()).access_token;
+}
+
+// --- Talking to the gateway
+async function api(path, query = {}, method = "GET", body = undefined) {
+  const url = new URL(gateway + path);
+  for (const [k, v] of Object.entries(query)) if (v !== "" && v != null) url.searchParams.set(k, v);
+  const headers = token ? {Authorization: "Bearer " + token} : {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const res = await fetch(url, {method, headers, body: body === undefined ? undefined : JSON.stringify(body)});
+  if (!res.ok) {
+    if (res.status === 401 && token) logout();
+    throw new Error(path + ": " + res.status + " " + await res.text());
+  }
+  return res.json();
+}
+
+// The token is kept across reloads, per gateway. GitHub OAuth Apps hand out no
+// refresh token, so the gateway's token is good for a year - until "Log out"
+// or until the gateway stops accepting it (a 401), whichever comes first.
+const TOKEN_KEY = "mrx-admin-token:" + gateway;
+const storage = {
+  get: () => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } },
+  set: t => { try { localStorage.setItem(TOKEN_KEY, t); } catch {} },
+  clear: () => { try { localStorage.removeItem(TOKEN_KEY); } catch {} },
+};
+
+function logout() {
+  token = null;
+  storage.clear();
+  location.replace(location.pathname + location.search);
+}
+
+const app = document.getElementById("app");
+const showError = e => app.insertAdjacentHTML("afterbegin", `<p class="error">${text(e.message || e)}</p>`);
+const run = f => async (...args) => { try { await f(...args); } catch (e) { console.error(e); showError(e); } };
+
+// --- Formatting
+const time = iso => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d) ? text(iso) : d.toLocaleString(undefined, {
+    month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  });
+};
+const duration = ms => ms == null ? "" : ms < 1000 ? ms + " ms" : (ms / 1000).toFixed(1) + " s";
+const bytes = n => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(0) + " KB" : (n / 1048576).toFixed(1) + " MB";
+const who = r => r.login || r.user || "";
+const whoLink = r => who(r) ? `<a class="who" data-user="${text(who(r))}">${text(who(r))}</a>` : "";
+const avatar = login => login ? `<img class="avatar" alt="" loading="lazy" src="https://github.com/${encodeURIComponent(login)}.png?size=44">` : "";
+const level = r => "raw" in r ? "RAW" : (r.level || "");
+const short = host => (host || "").replace(/^modal:/, "").slice(-6);
+
+// One log record as a row, and its full JSON as a hidden row under it
+function logRows(r) {
+  const lvl = level(r);
+  const msg = "raw" in r ? r.raw : (r.msg || "") + (r.error ? "\n" + (r.error.type ? r.error.type + ": " : "") + r.error.message : "");
+  return `<tr class="log">
+      <td class="time">${time(r.time)}</td>
+      <td><span class="lvl lvl-${text(lvl)}">${text(lvl)}</span></td>
+      <td class="muted" title="${text(r.host)}">${text(short(r.host))}</td>
+      <td class="muted">${text(r.service)}</td>
+      <td>${text(who(r))}</td>
+      <td>${text(r.tool)}</td>
+      <td class="muted">${text(r.event)}${r.duration_ms != null ? " " + duration(r.duration_ms) : ""}</td>
+      <td class="msg">${text(msg)}</td>
+    </tr><tr class="detail" hidden><td colspan="8"><pre>${text(JSON.stringify(r, null, 2))}</pre></td></tr>`;
+}
+const LOG_HEAD = `<tr><th>Time</th><th>Level</th><th>Host</th><th>Service</th><th>User</th><th>Tool</th><th>Event</th><th>Message</th></tr>`;
+
+function toggleDetails(tbody) {
+  tbody.addEventListener("click", e => {
+    const row = e.target.closest("tr.log");
+    if (row && !e.target.closest("a")) row.nextElementSibling.hidden = !row.nextElementSibling.hidden;
+  });
+}
+
+// --- Tabs
+const tabs = {
+  users: {label: "Users", render: renderUsers},
+  calls: {label: "Tool calls", render: renderCalls},
+  logs: {label: "Logs", render: renderLogs},
+  live: {label: "Live", render: renderLive},
+  admins: {label: "Admins", render: renderAdmins},
+};
+let usage = null, usageDays = 30, current = null;
+let callFilter = {user: "", tool: ""};
+
+function renderDashboard() {
+  app.innerHTML = `<nav>${Object.entries(tabs).map(([k, t]) =>
+    `<button data-tab="${k}">${t.label}</button>`).join("")}</nav><section id="tab"></section>`;
+  app.querySelector("nav").onclick = e => { if (e.target.dataset.tab) show(e.target.dataset.tab); };
+  show(location.hash.slice(1) in tabs ? location.hash.slice(1) : "users");
+}
+
+function show(name) {
+  current = name;
+  history.replaceState(null, "", "#" + name);
+  for (const b of app.querySelectorAll("nav button")) b.classList.toggle("active", b.dataset.tab === name);
+  // A fresh element per visit: a tab still loading when another one is opened
+  // finishes into its own, detached one rather than into the new tab's
+  const el = document.createElement("section");
+  el.id = "tab";
+  document.getElementById("tab").replaceWith(el);
+  run(tabs[name].render)(el);
+}
+
+async function loadUsage(force) {
+  if (!usage || force) usage = await api("/admin/api/usage", {days: usageDays});
+  return usage;
+}
+
+function daysSelect() {
+  return `<label class="muted">Last <select id="days">${[1, 7, 30, 90, 365].map(d =>
+    `<option value="${d}" ${d === usageDays ? "selected" : ""}>${d} day${d > 1 ? "s" : ""}</option>`).join("")}</select></label>
+    <button id="refresh">Refresh</button>`;
+}
+function wireDays(el, rerender) {
+  el.querySelector("#days").onchange = run(async e => { usageDays = +e.target.value; await loadUsage(true); rerender(el); });
+  el.querySelector("#refresh").onclick = run(async () => { await loadUsage(true); rerender(el); });
+}
+
+// --- Users
+let userSort = {key: "last", dir: -1};
+async function renderUsers(el) {
+  el.innerHTML = `<p class="muted">Loading…</p>`;
+  const {users} = await loadUsage();
+  const cols = [["login", "User"], ["calls", "Tool calls"], ["errors", "Errors"], ["requests", "Requests"],
+                ["first", "First seen"], ["last", "Last seen"]];
+  const sorted = [...users].sort((a, b) => {
+    const x = a[userSort.key] ?? "", y = b[userSort.key] ?? "";
+    return (x > y ? 1 : x < y ? -1 : 0) * userSort.dir;
+  });
+  el.innerHTML = `<div class="bar">${daysSelect()}<span class="muted">${users.length} user${users.length === 1 ? "" : "s"}</span></div>
+    <div class="table-wrap"><table><thead><tr>${cols.map(([k, l]) =>
+      `<th class="sortable" data-key="${k}">${l}${userSort.key === k ? (userSort.dir > 0 ? " ▲" : " ▼") : ""}</th>`).join("")}<th>Tools</th></tr></thead>
+    <tbody>${sorted.map(u => `<tr>
+      <td class="nowrap">${avatar(u.login)} <a class="who" data-user="${text(u.login || u.user)}">${text(u.login || u.user)}</a>
+        ${u.login ? `<span class="muted">${text(u.user)}</span>` : ""}</td>
+      <td class="num">${u.calls}</td>
+      <td class="num ${u.errors ? "error" : ""}">${u.errors}</td>
+      <td class="num">${u.requests}</td>
+      <td class="time">${time(u.first)}</td>
+      <td class="time">${time(u.last)}</td>
+      <td>${Object.entries(u.tools).sort((a, b) => b[1] - a[1]).map(([t, n]) =>
+        `<span class="chip">${text(t)} ${n}</span>`).join("")}</td>
+    </tr>`).join("") || `<tr><td colspan="7" class="muted">Nobody in this period.</td></tr>`}</tbody></table></div>`;
+  wireDays(el, renderUsers);
+  el.querySelector("thead").onclick = e => {
+    const key = e.target.closest("th")?.dataset.key;
+    if (!key) return;
+    userSort = {key, dir: userSort.key === key ? -userSort.dir : (key === "login" ? 1 : -1)};
+    renderUsers(el);
+  };
+  el.querySelector("tbody").onclick = e => {
+    const user = e.target.closest("a.who")?.dataset.user;
+    if (user) { callFilter = {user, tool: ""}; show("calls"); }
+  };
+}
+
+// --- Tool calls
+async function renderCalls(el) {
+  el.innerHTML = `<p class="muted">Loading…</p>`;
+  const {calls} = await loadUsage();
+  const tools = [...new Set(calls.map(c => c.tool).filter(Boolean))].sort();
+  el.innerHTML = `<div class="bar">${daysSelect()}
+      <input id="user" placeholder="user or login" value="${text(callFilter.user)}">
+      <select id="tool"><option value="">all tools</option>${tools.map(t =>
+        `<option ${t === callFilter.tool ? "selected" : ""}>${text(t)}</option>`).join("")}</select>
+      <span class="muted" id="count"></span></div>
+    <div class="table-wrap"><table><thead><tr><th>Started</th><th>User</th><th>Tool</th><th>Duration</th><th>Status</th><th>Arguments</th></tr></thead>
+    <tbody></tbody></table></div>`;
+  wireDays(el, renderCalls);
+  const tbody = el.querySelector("tbody");
+  const fill = () => {
+    const user = callFilter.user.toLowerCase();
+    const shown = calls.filter(c => (!user || [c.login, c.user].some(v => (v || "").toLowerCase() === user))
+                                 && (!callFilter.tool || c.tool === callFilter.tool));
+    el.querySelector("#count").textContent = `${shown.length} of ${calls.length} calls`;
+    tbody.innerHTML = shown.slice(0, 2000).map(c => `<tr>
+        <td class="time">${time(c.time)}</td>
+        <td class="nowrap">${whoLink(c)}</td>
+        <td>${text(c.tool)}</td>
+        <td class="num">${duration(c.duration_ms)}</td>
+        <td>${c.ok === true ? `<span class="lvl lvl-INFO">ok</span>` : c.ok === false
+          ? `<span class="lvl lvl-ERROR">error</span> <span class="muted">${text(c.error)}</span>`
+          : `<span class="muted">no end</span>`}</td>
+        <td class="muted"><code>${text(c.arguments ? JSON.stringify(c.arguments) : "")}</code></td>
+      </tr>`).join("") || `<tr><td colspan="6" class="muted">No calls.</td></tr>`;
+  };
+  el.querySelector("#user").oninput = e => { callFilter.user = e.target.value.trim(); fill(); };
+  el.querySelector("#tool").onchange = e => { callFilter.tool = e.target.value; fill(); };
+  tbody.onclick = e => {
+    const user = e.target.closest("a.who")?.dataset.user;
+    if (user) { callFilter.user = user; el.querySelector("#user").value = user; fill(); }
+  };
+  fill();
+}
+
+// --- Logs: the run files
+let logQuery = {run: "", level: "", user: "", tool: "", q: "", offset: null};
+const PAGE = 300;
+
+function filterInputs(f) {
+  return `<select id="level">${["", "DEBUG", "INFO", "WARNING", "ERROR"].map(l =>
+      `<option value="${l}" ${l === f.level ? "selected" : ""}>${l ? l + "+" : "all levels"}</option>`).join("")}</select>
+    <input id="fuser" placeholder="user or login" value="${text(f.user)}" size="12">
+    <input id="ftool" placeholder="tool" value="${text(f.tool)}" size="14">
+    <input id="fq" placeholder="search text" value="${text(f.q)}" size="16">`;
+}
+function readFilters(el, f) {
+  f.level = el.querySelector("#level").value;
+  f.user = el.querySelector("#fuser").value.trim();
+  f.tool = el.querySelector("#ftool").value.trim();
+  f.q = el.querySelector("#fq").value.trim();
+}
+
+async function renderLogs(el) {
+  el.innerHTML = `<p class="muted">Loading…</p>`;
+  const runs = await api("/admin/api/runs");
+  if (!runs.length) { el.innerHTML = `<p class="muted">No log files.</p>`; return; }
+  if (!runs.some(r => r.name === logQuery.run)) logQuery.run = runs[0].name;
+  el.innerHTML = `<div class="bar">
+      <select id="run">${runs.map(r => `<option value="${text(r.name)}" ${r.name === logQuery.run ? "selected" : ""}>${text(r.name)} (${bytes(r.size)})</option>`).join("")}</select>
+      ${filterInputs(logQuery)}
+      <button class="primary" id="load">Show</button>
+      <button id="older">◀ Older</button><button id="newer">Newer ▶</button>
+      <span class="muted" id="count"></span></div>
+    <div class="table-wrap"><table><thead>${LOG_HEAD}</thead><tbody></tbody></table></div>`;
+  const tbody = el.querySelector("tbody");
+  toggleDetails(tbody);
+  let page = null;
+  const load = run(async () => {
+    el.querySelector("#count").textContent = "Loading…";
+    page = await api("/admin/api/runs/" + encodeURIComponent(logQuery.run), {
+      level: logQuery.level, user: logQuery.user, tool: logQuery.tool, q: logQuery.q,
+      offset: logQuery.offset, limit: PAGE,
+    });
+    logQuery.offset = page.offset;
+    tbody.innerHTML = page.records.map(logRows).join("") || `<tr><td colspan="8" class="muted">Nothing matches.</td></tr>`;
+    el.querySelector("#count").textContent = page.total
+      ? `${page.offset + 1}–${page.offset + page.records.length} of ${page.total}` : "";
+    el.querySelector("#older").disabled = page.offset === 0;
+    el.querySelector("#newer").disabled = page.offset + page.records.length >= page.total;
+  });
+  const fresh = () => { readFilters(el, logQuery); logQuery.run = el.querySelector("#run").value; logQuery.offset = null; load(); };
+  el.querySelector("#load").onclick = fresh;
+  el.querySelector("#run").onchange = fresh;
+  el.querySelector(".bar").onkeydown = e => { if (e.key === "Enter") fresh(); };
+  el.querySelector("#older").onclick = () => { logQuery.offset = Math.max(page.offset - PAGE, 0); load(); };
+  el.querySelector("#newer").onclick = () => { logQuery.offset = page.offset + PAGE; load(); };
+  await load();
+}
+
+// --- Live: every container's new lines, polled
+const LIVE_INTERVAL = 2000, LIVE_KEPT = 2000;
+let live = {cursor: null, records: [], paused: false, timer: null, busy: false, filter: {level: "", user: "", tool: "", q: ""}};
+const LEVELS = {DEBUG: 10, INFO: 20, WARNING: 30, ERROR: 40, CRITICAL: 50};
+
+function liveMatches(r, f) {
+  const raw = "raw" in r;
+  if (f.level && !raw && (LEVELS[r.level] || 0) < LEVELS[f.level]) return false;
+  if (f.user && !raw && ![r.user, r.login].some(v => (v || "").toLowerCase() === f.user.toLowerCase())) return false;
+  if (f.tool && r.tool !== f.tool) return false;
+  if (f.q && !JSON.stringify(r).toLowerCase().includes(f.q.toLowerCase())) return false;
+  return true;
+}
+
+async function pollLive() {
+  clearTimeout(live.timer);
+  // One loop at a time: coming back to the tab while a request is out would
+  // otherwise start a second one
+  if (current !== "live" || live.busy) return;
+  live.busy = true;
+  try {
+    if (!live.paused) {
+      const res = await api("/admin/api/live", {cursor: live.cursor ? JSON.stringify(live.cursor) : ""});
+      live.cursor = res.cursor;
+      if (res.records.length) {
+        live.records = live.records.concat(res.records).slice(-LIVE_KEPT);
+        const tbody = document.querySelector("#live-body");
+        // Newest on top
+        const fresh = res.records.filter(r => liveMatches(r, live.filter)).reverse();
+        if (tbody && fresh.length) {
+          tbody.insertAdjacentHTML("afterbegin", fresh.map(logRows).join(""));
+          while (tbody.rows.length > LIVE_KEPT * 2) tbody.deleteRow(-1);
+        }
+      }
+      const status = document.querySelector("#live-status");
+      if (status) status.textContent = `${Object.keys(live.cursor || {}).length} container(s) · updated ${new Date().toLocaleTimeString()}`;
+    }
+  } catch (e) {
+    const status = document.querySelector("#live-status");
+    if (status) status.innerHTML = `<span class="error">${text(e.message)}</span>`;
+  } finally {
+    live.busy = false;
+  }
+  if (current === "live") live.timer = setTimeout(pollLive, LIVE_INTERVAL);
+}
+
+async function renderLive(el) {
+  el.innerHTML = `<div class="bar">
+      <button id="pause">${live.paused ? "Resume" : "Pause"}</button>
+      ${filterInputs(live.filter)}
+      <button id="clear">Clear</button>
+      <span class="muted" id="live-status"></span></div>
+    <div class="table-wrap"><table><thead>${LOG_HEAD}</thead><tbody id="live-body"></tbody></table></div>`;
+  const tbody = el.querySelector("#live-body");
+  toggleDetails(tbody);
+  const redraw = () => {
+    tbody.innerHTML = live.records.filter(r => liveMatches(r, live.filter)).reverse().map(logRows).join("");
+  };
+  el.querySelector(".bar").oninput = () => { readFilters(el, live.filter); redraw(); };
+  el.querySelector("#pause").onclick = e => { live.paused = !live.paused; e.target.textContent = live.paused ? "Resume" : "Pause"; };
+  el.querySelector("#clear").onclick = () => { live.records = []; redraw(); };
+  redraw();
+  pollLive();
+}
+
+// --- Admins: who may open this page, kept in `admins.txt` on the gateway's volume
+let me = null;
+async function renderAdmins(el, list) {
+  if (!list) {
+    el.innerHTML = `<p class="muted">Loading…</p>`;
+    list = await api("/admin/api/admins");
+  }
+  el.innerHTML = `<form class="bar" id="add">
+      <input id="login" placeholder="GitHub login" required>
+      <button class="primary">Add admin</button>
+      <span class="muted">Stored by GitHub user id, so a renamed account stays admin.
+        Other servers pick up a change within 30 s.</span></form>
+    <div class="table-wrap"><table><thead><tr><th>User</th><th>GitHub id</th><th></th></tr></thead>
+    <tbody>${list.map(a => `<tr>
+      <td class="nowrap">${avatar(a.login)} ${text(a.login || "")}</td>
+      <td class="muted">${text(a.id)}</td>
+      <td>${list.length > 1 ? `<button data-remove="${text(a.id)}" data-login="${text(a.login || a.id)}">Remove</button>` : ""}</td>
+    </tr>`).join("") || `<tr><td colspan="3" class="muted">Nobody - <code>admins.txt</code> is empty or missing.</td></tr>`}</tbody></table></div>`;
+  el.querySelector("#add").onsubmit = run(async e => {
+    e.preventDefault();
+    const login = el.querySelector("#login").value.trim();
+    if (login) await renderAdmins(el, await api("/admin/api/admins", {}, "POST", {login}));
+  });
+  el.querySelector("tbody").onclick = run(async e => {
+    const button = e.target.closest("button[data-remove]");
+    if (!button) return;
+    const self = me && me.login && button.dataset.login.toLowerCase() === me.login.toLowerCase();
+    if (!confirm(`Remove ${button.dataset.login} as admin?` + (self ? " That is you - you lose access to this page." : ""))) return;
+    await renderAdmins(el, await api("/admin/api/admins/" + encodeURIComponent(button.dataset.remove), {}, "DELETE"));
+  });
+}
+
+// --- Start
+async function start() {
+  me = await api("/admin/api/me");
+  document.getElementById("me").innerHTML = me.login
+    ? `${avatar(me.login)} <span>${text(me.login)}</span> <button id="logout">Log out</button>`
+    : `<span class="muted">local, no login</span>`;
+  document.getElementById("logout")?.addEventListener("click", logout);
+  if (!me.admin) {
+    app.innerHTML = `<div class="center"><p>Signed in as <b>${text(me.login)}</b> - not an admin.</p>
+      <p class="muted">An admin can add you on the dashboard's Admins tab.</p></div>`;
+    return;
+  }
+  renderDashboard();
+}
+
+document.getElementById("login").onclick = run(() => login("MRX admin dashboard"));
+if (params.has("error")) {
+  showError(params.get("error_description") || params.get("error"));
+} else if (params.has("code")) {
+  run(async () => { await finishLogin(params); storage.set(token); await start(); })();
+} else if ((token = storage.get())) {
+  run(start)();
+} else {
+  // A gateway running without OAuth (local dev) answers without a login
+  fetch(gateway + "/admin/api/me").then(res => { if (res.ok) run(start)(); }).catch(() => {});
+}
+</script>
+</body>
+</html>
