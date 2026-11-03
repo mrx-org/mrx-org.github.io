@@ -21,6 +21,7 @@ import os
 import random
 import socket
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -456,9 +457,10 @@ class Runner:
             # Written before its line goes into the control file, so the
             # interpreter never finds a path that is not complete yet
             write_atomic(seq_path, self.api.download(job["sequence_url"]))
-            line = scanner_path(self.args.scanner_measurement_dir, state["date"], name)
-            if append_to_control_file(self.args.control_file, line):
-                self.say("added to control file: {}".format(line))
+            if self.args.control_file is not None:
+                line = scanner_path(self.args.scanner_measurement_dir, state["date"], name)
+                if append_to_control_file(self.args.control_file, line):
+                    self.say("added to control file: {}".format(line))
             state["stage"] = "measuring"
             self.state.save(state)
         self.report(job, "measuring")
@@ -527,15 +529,17 @@ class Runner:
 
     def simulate(self, seq_path: str, dat_path: str) -> None:
         """Play the interpreter: wait a bit, find the newest line in the control
-        file, and write noise in its layout where the real data would go."""
+        file (if there is one), and write noise in its layout where the real data
+        would go."""
         time.sleep(self.args.simulate_delay)
-        with open(self.args.control_file, "r") as f:
-            lines = [l.strip() for l in f if l.strip() and l.strip() != WAIT]
-        prefix = self.args.scanner_measurement_dir.replace("\\", "/").rstrip("/")
-        local = os.path.join(self.args.measurement_dir, lines[-1][len(prefix) :].lstrip("/"))
-        if os.path.normcase(os.path.normpath(local)) != os.path.normcase(os.path.normpath(seq_path)):
-            self.say("simulate: the control file's last line is not this job, writing nothing")
-            return
+        if self.args.control_file is not None:
+            with open(self.args.control_file, "r") as f:
+                lines = [l.strip() for l in f if l.strip() and l.strip() != WAIT]
+            prefix = self.args.scanner_measurement_dir.replace("\\", "/").rstrip("/")
+            local = os.path.join(self.args.measurement_dir, lines[-1][len(prefix) :].lstrip("/"))
+            if os.path.normcase(os.path.normpath(local)) != os.path.normcase(os.path.normpath(seq_path)):
+                self.say("simulate: the control file's last line is not this job, writing nothing")
+                return
         try:
             with open(seq_path, "r", encoding="utf-8") as f:
                 counts = adc_sample_counts(f.read())
@@ -584,12 +588,23 @@ def settings(argv: Optional[List[str]] = None):
 
     # Asked for only when not given, so for this site Enter is the usual answer
     if args.measurement_dir is None:
-        args.measurement_dir = ask("Measurement folder (this PC)", DEFAULT_MEASUREMENT_DIR)
+        if args.simulate:
+            # Simulated data does not belong with the real measurements
+            default = os.path.join(tempfile.gettempdir(), "mrx_scanner_simulate")
+            args.measurement_dir = ask("Measurement folder (this PC)", default)
+            if args.measurement_dir == default:
+                os.makedirs(default, exist_ok=True)
+        else:
+            args.measurement_dir = ask("Measurement folder (this PC)", DEFAULT_MEASUREMENT_DIR)
     if args.scanner_measurement_dir is None:
-        # When simulating, this PC is the scanner too
-        default = args.measurement_dir if args.simulate else DEFAULT_SCANNER_MEASUREMENT_DIR
-        args.scanner_measurement_dir = ask("Measurement folder (as the scanner sees it)", default)
-    if args.control_file is None:
+        if args.simulate:
+            # When simulating, this PC is the scanner too
+            args.scanner_measurement_dir = args.measurement_dir
+        else:
+            args.scanner_measurement_dir = ask("Measurement folder (as the scanner sees it)", DEFAULT_SCANNER_MEASUREMENT_DIR)
+    # When simulating, no interpreter reads a control file, so it is only used
+    # when given
+    if args.control_file is None and not args.simulate:
         args.control_file = ask("Control file", DEFAULT_CONTROL_FILE)
     if args.coils is None:
         args.coils = int(ask("Receive coils", DEFAULT_COILS))
@@ -601,10 +616,11 @@ def settings(argv: Optional[List[str]] = None):
         problems.append("measurement folder does not exist: " + args.measurement_dir)
     elif not os.access(args.measurement_dir, os.W_OK):
         problems.append("measurement folder is not writable: " + args.measurement_dir)
-    if not os.path.isfile(args.control_file):
-        problems.append("control file does not exist: " + args.control_file)
-    elif not os.access(args.control_file, os.W_OK):
-        problems.append("control file is not writable: " + args.control_file)
+    if args.control_file is not None:
+        if not os.path.isfile(args.control_file):
+            problems.append("control file does not exist: " + args.control_file)
+        elif not os.access(args.control_file, os.W_OK):
+            problems.append("control file is not writable: " + args.control_file)
     if args.coils < 1 or args.adc_padding < 0:
         problems.append("--coils must be at least 1 and --adc-padding not negative")
     if problems:
@@ -621,7 +637,10 @@ def command_line(args) -> str:
         "python", quote(os.path.basename(sys.argv[0]) or "mrx_scanner.py"),
         "--measurement-dir", quote(args.measurement_dir),
         "--scanner-measurement-dir", quote(args.scanner_measurement_dir),
-        "--control-file", quote(args.control_file),
+    ]
+    if args.control_file is not None:
+        parts += ["--control-file", quote(args.control_file)]
+    parts += [
         "--coils", str(args.coils),
         "--adc-padding", str(args.adc_padding),
     ]
