@@ -53,6 +53,9 @@
 <code>mrx_scanner.py</code>, which runs on the PC next to the scanner (Python 3.8
 or newer with numpy), and shows the scan token to give to the people who may
 measure on it. A session ends 4 hours after it was last used.</p>
+<p><label><input type="checkbox" id="conjugate" checked> <b>Complex conjugate signal:</b>
+Siemens scanners don't follow the physical convention of MRX. Checking this box will
+complex conjugate the measured signal before upload.</label></p>
 <div id="app"></div>
 <p class="muted" id="gateway"></p>
 <script>
@@ -160,7 +163,8 @@ async function create() {
   const res = await fetch(gateway + "/scanner/sessions", {method: "POST", headers});
   if (!res.ok) throw new Error("POST /scanner/sessions: " + res.status + " " + await res.text());
   const s = await res.json();
-  const script = await renderScript(s.values);
+  const conjugate = document.getElementById("conjugate").checked;
+  const script = await renderScript({...s.values, CONJUGATE: conjugate ? "yes" : "no"});
 
   const link = document.createElement("a");
   link.href = URL.createObjectURL(new Blob([script], {type: "text/x-python"}));
@@ -172,6 +176,7 @@ async function create() {
      <pre>python ${text(s.file_name)}</pre>
      <p><b>Scan token</b> - give it to whoever may measure on this scanner:</p>
      <pre>${text(s.token)}</pre>
+     <p>The measured signal ${conjugate ? "is" : "is <b>not</b>"} complex conjugated before upload.</p>
      <p>They measure with <code>scan(sequence="&lt;hash of the .seq&gt;", scanner="${text(s.token)}")</code>.
      The script prints the token too.</p>
      <button id="again">Create another session</button>`;

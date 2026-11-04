@@ -38,6 +38,10 @@ BASE_URL = "__MRX_BASE_URL__"
 RUNNER_SECRET = "__MRX_RUNNER_SECRET__"
 SCAN_TOKEN = "__MRX_SCAN_TOKEN__"
 OPERATOR = "__MRX_OPERATOR__"
+# Siemens scanners do not follow MRX's physical sign convention, so the signal
+# is complex conjugated before upload unless the session page said "no" (a
+# copy that was not filled in conjugates too).
+CONJUGATE = "__MRX_CONJUGATE__" != "no"
 
 # The defaults for the site this was built for; every one can be overridden
 DEFAULT_MEASUREMENT_DIR = r"W:\neuroradiologie\zaiss-mrx\measurement"
@@ -512,6 +516,8 @@ class Runner:
                 counts = adc_sample_counts(f.read())
             with open(dat_path, "r", encoding="ascii") as f:
                 signal = convert(f.read(), counts, self.args.coils, self.args.adc_padding)
+            if CONJUGATE:
+                signal = np.conj(signal)
         except (ValueError, UnicodeDecodeError) as e:
             # Whoever looks into it needs the raw file, which only the site has
             message = "{} - the raw data stays at the site, in {}".format(e, dat_path)
@@ -660,7 +666,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     console = Console()
     print("\nNext time, the same settings are:\n  {}\n".format(command_line(args)))
     print("MRX scanner session of {} at {}".format(OPERATOR, BASE_URL))
-    print("Scan token (give it to who may measure here): {}\n".format(SCAN_TOKEN))
+    print("Scan token (give it to who may measure here): {}".format(SCAN_TOKEN))
+    print("Signal is {}complex conjugated before upload\n".format("" if CONJUGATE else "NOT "))
     if args.simulate:
         print("SIMULATING: no scanner is used, the data is noise\n")
 
