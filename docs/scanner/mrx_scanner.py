@@ -262,7 +262,7 @@ class Api:
     server errors are retried with backoff for as long as it takes (the site's
     connection is expected to come back), anything else is raised."""
 
-    def __init__(self, base_url: str, secret: str, say: Callable[[str], None]) -> None:
+    def __init__(self, base_url: str, secret: str, say: Callable[..., None]) -> None:
         self.base_url = base_url.rstrip("/")
         self.secret = secret
         self.say = say
@@ -288,7 +288,7 @@ class Api:
                 problem = "server error {}".format(e.code)
             except (urllib.error.URLError, socket.timeout, ConnectionError) as e:
                 problem = "network error ({})".format(getattr(e, "reason", e))
-            self.say("{} - retrying in {:.0f} s".format(problem, delay))
+            self.say("{} - retrying in {:.0f} s".format(problem, delay), YELLOW)
             time.sleep(delay)
             delay = min(delay * 2, MAX_BACKOFF)
 
@@ -324,19 +324,57 @@ class Api:
 # =============================================================================
 
 
+# ANSI styles for `Console.paint`
+RED, GREEN, YELLOW, CYAN, BOLD, DIM = "31", "32", "33", "36", "1", "2"
+
+
+def _enable_windows_colors() -> bool:
+    """Windows 10 and later understand ANSI codes once the console is switched
+    to it (ENABLE_VIRTUAL_TERMINAL_PROCESSING); older ones refuse."""
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.GetStdHandle(-11)  # standard output
+        mode = ctypes.c_uint32()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return False
+        return bool(kernel32.SetConsoleMode(handle, mode.value | 0x0004))
+    except Exception:
+        return False
+
+
+def colors_supported(stream=None) -> bool:
+    """Colors only on a terminal that shows them - not when the output goes to
+    a file, nor with `NO_COLOR` set (https://no-color.org)."""
+    stream = stream or sys.stdout
+    if os.environ.get("NO_COLOR") or not getattr(stream, "isatty", lambda: False)():
+        return False
+    if os.name == "nt":
+        return _enable_windows_colors()
+    return os.environ.get("TERM") != "dumb"
+
+
 class Console:
     """What the operator sees. Every line also goes to the gateway with the
-    next report, so the gateway's log shows what happened at the site."""
+    next report, so the gateway's log shows what happened at the site - without
+    the colors."""
 
-    def __init__(self) -> None:
+    def __init__(self, colors: Optional[bool] = None) -> None:
         self.pending = []  # type: List[str]
         self.lock = threading.Lock()
+        self.colors = colors_supported() if colors is None else colors
 
-    def say(self, message: str) -> None:
-        line = "[{}] {}".format(datetime.now().strftime("%H:%M:%S"), message)
-        print(line, flush=True)
+    def paint(self, text: str, *styles: str) -> str:
+        if not self.colors or not styles:
+            return text
+        return "\033[{}m{}\033[0m".format(";".join(styles), text)
+
+    def say(self, message: str, *styles: str) -> None:
+        stamp = "[{}]".format(datetime.now().strftime("%H:%M:%S"))
+        print("{} {}".format(self.paint(stamp, DIM), self.paint(message, *styles)), flush=True)
         with self.lock:
-            self.pending.append(line)
+            self.pending.append("{} {}".format(stamp, message))
 
     def take(self) -> List[str]:
         with self.lock:
@@ -465,7 +503,7 @@ class Runner:
             try:
                 self.finish(job)
             except JobEnded as e:
-                self.say("job {} was ended by the gateway: {}".format(job.id, e))
+                self.say("job {} was ended by the gateway: {}".format(job.id, e), RED)
             self.jobs.pop(0)
             self.state.drop(job.id)
 
@@ -486,7 +524,7 @@ class Runner:
                 self.jobs.append(self.start(job))
             except JobEnded as e:
                 # The .seq could not be downloaded
-                self.say("job {} failed: {}".format(job["id"], e))
+                self.say("job {} failed: {}".format(job["id"], e), RED)
                 try:
                     self.report(job, "failed", str(e))
                 except JobEnded:
@@ -498,9 +536,9 @@ class Runner:
         entry = self.state.load(job["id"])
         name = "mrx_{}.seq".format(job["id"])
         if entry:
-            self.say("resuming job {} from {} ({})".format(job["id"], job["login"], name))
+            self.say("resuming job {} from {} ({})".format(job["id"], job["login"], name), BOLD, CYAN)
         else:
-            self.say("job {} from {}: {}".format(job["id"], job["login"], name))
+            self.say("job {} from {}: {}".format(job["id"], job["login"], name), BOLD, CYAN)
             entry = {"date": datetime.now().strftime("%Y%m%d"), "stage": "new"}
         new = Job(job, entry, self.args.measurement_dir)
 
@@ -537,7 +575,7 @@ class Runner:
             try:
                 self.wait_for(job)
             except Skipped as e:
-                self.say("job {} failed: {}".format(job.id, e))
+                self.say("job {} failed: {}".format(job.id, e), RED)
                 self.report(job.job, "failed", str(e))
                 return
 
@@ -603,7 +641,7 @@ class Runner:
         except (ValueError, UnicodeDecodeError) as e:
             # Whoever looks into it needs the raw file, which only the site has
             message = "{} - the raw data stays at the site, in {}".format(e, job.dat_path)
-            self.say("job {} failed: {}".format(job.id, message))
+            self.say("job {} failed: {}".format(job.id, message), RED)
             self.report(job.job, "failed", message)
             return
 
@@ -613,7 +651,7 @@ class Runner:
         self.api.upload(job.id, "signal.npy", npy_bytes(signal), {"X-Signal-Shape": "{},{}".format(*shape)})
         # The gateway has the signal now, so the job is done there. This line
         # reaches the gateway's log with the next report.
-        self.say("job {} done: signal {} x {} coils uploaded".format(job.id, *shape))
+        self.say("job {} done: signal {} x {} coils uploaded".format(job.id, *shape), GREEN)
 
     def simulate(self, job: Job) -> None:
         """Play the interpreter: wait a bit, check that the job is in the
@@ -626,7 +664,7 @@ class Runner:
             with open(self.args.control_file, "r") as f:
                 lines = [l.strip() for l in f]
             if line not in lines:
-                self.say("simulate: this job is not in the control file, writing nothing")
+                self.say("simulate: this job is not in the control file, writing nothing", YELLOW)
                 return
         try:
             with open(job.seq_path, "r", encoding="utf-8") as f:
@@ -636,7 +674,7 @@ class Runner:
             self.simulate_failed = "simulate: cannot read {}: {}".format(job.name, e)
             return
         write_atomic(job.dat_path, fake_dat(counts, self.args.coils, self.args.adc_padding).encode())
-        self.say("simulate: wrote {}".format(os.path.basename(job.dat_path)))
+        self.say("simulate: wrote {}".format(os.path.basename(job.dat_path)), DIM)
 
 
 # =============================================================================
@@ -746,12 +784,16 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     args = settings(argv)
     console = Console()
-    print("\nNext time, the same settings are:\n  {}\n".format(command_line(args)))
-    print("MRX scanner session of {} at {}".format(OPERATOR, BASE_URL))
-    print("Scan token (give it to who may measure here): {}".format(SCAN_TOKEN))
-    print("Signal is {}complex conjugated before upload\n".format("" if CONJUGATE else "NOT "))
+    paint = console.paint
+    print("\nNext time, the same settings are:\n  {}\n".format(paint(command_line(args), DIM)))
+    print("MRX scanner session of {} at {}".format(paint(OPERATOR, BOLD), BASE_URL))
+    print("Scan token (give it to who may measure here): {}".format(paint(SCAN_TOKEN, BOLD, CYAN)))
+    if CONJUGATE:
+        print("Signal is complex conjugated before upload\n")
+    else:
+        print(paint("Signal is NOT complex conjugated before upload", YELLOW) + "\n")
     if args.simulate:
-        print("SIMULATING: no scanner is used, the data is noise\n")
+        print(paint("SIMULATING: no scanner is used, the data is noise", BOLD, YELLOW) + "\n")
 
     api = Api(BASE_URL, RUNNER_SECRET, console.say)
     runner = Runner(args, api, console, SkipReader().start())
@@ -759,10 +801,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         runner.run()
     except SessionEnded as e:
-        console.say(str(e) or "session expired - get a new script at {}/scanner/new".format(BASE_URL))
+        console.say(str(e) or "session expired - get a new script at {}/scanner/new".format(BASE_URL), RED)
         return 1
     except KeyboardInterrupt:
-        console.say("stopped")
+        console.say("stopped", YELLOW)
     return 0
 
 
