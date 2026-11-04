@@ -1,16 +1,17 @@
 """The scanner-side script: runs on the PC next to a scanner, takes the sequences
 queued for it from the gateway, has the Pulseq interpreter measure them and
-uploads what it measured. See `scan-plan/design.md` for why it works this way.
+uploads what it measured. See `docs/scan/design.md` in the mcp-gateway repo for
+why it works this way.
 
-A copy of this file is published as `mrx_scanner.py` next to the session page
-on mrx-org.github.io (`docs/scanner/`), which hands it out with a session's
-secrets filled in - copy it there to ship a change. It runs on whatever Python
+This file lives only here, next to the session page on mrx-org.github.io
+(`docs/scanner/`), which hands it out with a session's secrets filled in. The
+gateway keeps its own copy of `adc_sample_counts` (`scan/seq.py`) - change both
+together. It runs on whatever Python
 that PC has. So it is one file, needs nothing but numpy
 (which a standard Python or conda install on Windows comes with) and stays
 Python 3.8 compatible: no `requests`, no `match`, no `X | Y` annotations.
 
-This module is also imported by the gateway and its tests, which is why
-everything that runs lives behind functions.
+Everything that runs lives behind functions, so that it can be imported to test.
 """
 
 import argparse
@@ -38,6 +39,10 @@ BASE_URL = "__MRX_BASE_URL__"
 RUNNER_SECRET = "__MRX_RUNNER_SECRET__"
 SCAN_TOKEN = "__MRX_SCAN_TOKEN__"
 OPERATOR = "__MRX_OPERATOR__"
+# Siemens scanners do not follow MRX's physical sign convention, so the signal
+# is complex conjugated before upload unless the session page said "no" (a
+# copy that was not filled in conjugates too).
+CONJUGATE = "__MRX_CONJUGATE__" != "no"
 
 # The defaults for the site this was built for; every one can be overridden
 DEFAULT_MEASUREMENT_DIR = r"W:\neuroradiologie\zaiss-mrx\measurement"
@@ -257,7 +262,7 @@ class Api:
     server errors are retried with backoff for as long as it takes (the site's
     connection is expected to come back), anything else is raised."""
 
-    def __init__(self, base_url: str, secret: str, say: Callable[[str], None]) -> None:
+    def __init__(self, base_url: str, secret: str, say: Callable[..., None]) -> None:
         self.base_url = base_url.rstrip("/")
         self.secret = secret
         self.say = say
@@ -283,12 +288,15 @@ class Api:
                 problem = "server error {}".format(e.code)
             except (urllib.error.URLError, socket.timeout, ConnectionError) as e:
                 problem = "network error ({})".format(getattr(e, "reason", e))
-            self.say("{} - retrying in {:.0f} s".format(problem, delay))
+            self.say("{} - retrying in {:.0f} s".format(problem, delay), YELLOW)
             time.sleep(delay)
             delay = min(delay * 2, MAX_BACKOFF)
 
-    def next_job(self) -> Optional[dict]:
-        status, body = self.request("GET", "/scanner/api/next")
+    def next_job(self, have: List[str]) -> Optional[dict]:
+        """The next job the script does not `have` yet, if the gateway has one
+        for it."""
+        query = "?have=" + ",".join(have) if have else ""
+        status, body = self.request("GET", "/scanner/api/next" + query)
         return json.loads(body) if status == 200 else None
 
     def report(self, job_id: str, state: str, message: str = "", log: Optional[List[str]] = None) -> None:
@@ -316,19 +324,57 @@ class Api:
 # =============================================================================
 
 
+# ANSI styles for `Console.paint`
+RED, GREEN, YELLOW, CYAN, BOLD, DIM = "31", "32", "33", "36", "1", "2"
+
+
+def _enable_windows_colors() -> bool:
+    """Windows 10 and later understand ANSI codes once the console is switched
+    to it (ENABLE_VIRTUAL_TERMINAL_PROCESSING); older ones refuse."""
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.GetStdHandle(-11)  # standard output
+        mode = ctypes.c_uint32()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return False
+        return bool(kernel32.SetConsoleMode(handle, mode.value | 0x0004))
+    except Exception:
+        return False
+
+
+def colors_supported(stream=None) -> bool:
+    """Colors only on a terminal that shows them - not when the output goes to
+    a file, nor with `NO_COLOR` set (https://no-color.org)."""
+    stream = stream or sys.stdout
+    if os.environ.get("NO_COLOR") or not getattr(stream, "isatty", lambda: False)():
+        return False
+    if os.name == "nt":
+        return _enable_windows_colors()
+    return os.environ.get("TERM") != "dumb"
+
+
 class Console:
     """What the operator sees. Every line also goes to the gateway with the
-    next report, so the gateway's log shows what happened at the site."""
+    next report, so the gateway's log shows what happened at the site - without
+    the colors."""
 
-    def __init__(self) -> None:
+    def __init__(self, colors: Optional[bool] = None) -> None:
         self.pending = []  # type: List[str]
         self.lock = threading.Lock()
+        self.colors = colors_supported() if colors is None else colors
 
-    def say(self, message: str) -> None:
-        line = "[{}] {}".format(datetime.now().strftime("%H:%M:%S"), message)
-        print(line, flush=True)
+    def paint(self, text: str, *styles: str) -> str:
+        if not self.colors or not styles:
+            return text
+        return "\033[{}m{}\033[0m".format(";".join(styles), text)
+
+    def say(self, message: str, *styles: str) -> None:
+        stamp = "[{}]".format(datetime.now().strftime("%H:%M:%S"))
+        print("{} {}".format(self.paint(stamp, DIM), self.paint(message, *styles)), flush=True)
         with self.lock:
-            self.pending.append(line)
+            self.pending.append("{} {}".format(stamp, message))
 
     def take(self) -> List[str]:
         with self.lock:
@@ -362,33 +408,45 @@ class Skipped(Exception):
 # =============================================================================
 # Restart safety
 # =============================================================================
-# The job in flight and how far it got, so a restarted script carries on with it
-# rather than appending it to the control file a second time. The gateway hands
-# a restarted script the same job again; this says what was already done.
+# The jobs in flight and how far each got, so a restarted script carries on with
+# them rather than appending them to the control file a second time. The gateway
+# hands a restarted script the same jobs again; this says what was already done.
 
 
 class State:
     def __init__(self, path: str, session: str) -> None:
         self.path = path
         # Which session the file is about: a script of a new session must not
-        # resume the job of an old one.
+        # resume the jobs of an old one.
         self.session = session
 
-    def load(self, job_id: str) -> dict:
+    def _read(self) -> dict:
         try:
             with open(self.path, "r") as f:
                 state = json.load(f)
         except (OSError, ValueError):
             return {}
-        if state.get("session") != self.session or state.get("job") != job_id:
+        if state.get("session") != self.session:
             return {}
-        return state
+        if "jobs" not in state and "job" in state:
+            # Written by a script that had one job at a time
+            return {state["job"]: state}
+        return state.get("jobs") or {}
 
-    def save(self, state: dict) -> None:
-        state["session"] = self.session
-        write_atomic(self.path, json.dumps(state).encode())
+    def load(self, job_id: str) -> dict:
+        return dict(self._read().get(job_id) or {})
 
-    def clear(self) -> None:
+    def save(self, job_id: str, entry: dict) -> None:
+        jobs = self._read()
+        jobs[job_id] = entry
+        write_atomic(self.path, json.dumps({"session": self.session, "jobs": jobs}).encode())
+
+    def drop(self, job_id: str) -> None:
+        jobs = self._read()
+        jobs.pop(job_id, None)
+        if jobs:
+            write_atomic(self.path, json.dumps({"session": self.session, "jobs": jobs}).encode())
+            return
         try:
             os.remove(self.path)
         except OSError:
@@ -398,6 +456,25 @@ class State:
 # =============================================================================
 # The loop
 # =============================================================================
+# The script holds up to two jobs: the one being measured, and the next one,
+# which is already in the control file so that the interpreter starts it as soon
+# as the measurement before it ends - converting and uploading happen during the
+# next measurement, not between the two. How many it may hold is the gateway's
+# to decide (`MAX_IN_FLIGHT` there): everything else stays in its queue, where
+# it can still be cancelled.
+
+
+class Job:
+    """A job the script has: what the gateway sent, its entry in the state
+    file and where its files are."""
+
+    def __init__(self, job: dict, entry: dict, measurement_dir: str) -> None:
+        self.id = job["id"]
+        self.job = job
+        self.entry = entry
+        self.name = "mrx_{}.seq".format(self.id)
+        self.seq_path = os.path.join(measurement_dir, entry["date"], self.name)
+        self.dat_path = self.seq_path + ".dat"
 
 
 class Runner:
@@ -407,84 +484,107 @@ class Runner:
         self.console = console
         self.say = console.say
         self.skip = skip
+        # Oldest first; the first is the one being measured
+        self.jobs = []  # type: List[Job]
         # Why `--simulate` could not write the data, which ends the wait like a skip
         self.simulate_failed = None  # type: Optional[str]
-        session =hashlib.sha256(api.secret.encode()).hexdigest()[:16]
+        session = hashlib.sha256(api.secret.encode()).hexdigest()[:16]
         self.state = State(os.path.join(args.measurement_dir, STATE_FILE), session)
 
     def run(self) -> None:
-        """Poll, handle one job at a time, repeat - until the session ends."""
+        """Poll, finish the oldest job while the next one waits in the control
+        file, repeat - until the session ends."""
         while True:
-            job = self.api.next_job()
-            if job is None:
+            self.take_more()
+            if not self.jobs:
                 time.sleep(self.args.poll_interval)
                 continue
+            job = self.jobs[0]
             try:
-                self.handle(job)
+                self.finish(job)
             except JobEnded as e:
-                self.say("job {} was ended by the gateway: {}".format(job["id"], e))
-                self.state.clear()
+                self.say("job {} was ended by the gateway: {}".format(job.id, e), RED)
+            self.jobs.pop(0)
+            self.state.drop(job.id)
 
     def report(self, job: dict, state: str, message: str = "") -> None:
         self.api.report(job["id"], state, message, self.console.take())
 
-    def handle(self, job: dict) -> None:
-        job_id = job["id"]
-        state = self.state.load(job_id)
-        name = "mrx_{}.seq".format(job_id)
-        if state:
-            self.say("resuming job {} from {} ({})".format(job_id, job["login"], name))
-        else:
-            self.say("job {} from {}: {}".format(job_id, job["login"], name))
-            state = {"job": job_id, "date": datetime.now().strftime("%Y%m%d"), "stage": "new"}
-
-        folder = os.path.join(self.args.measurement_dir, state["date"])
-        seq_path = os.path.join(folder, name)
-        dat_path = seq_path + ".dat"
-
-        if job["state"] == "uploading":
-            # Restarted in the middle of an upload: the data is already there
-            if not os.path.exists(dat_path):
-                self.report(job, "failed", "the script restarted and {} is gone".format(dat_path))
-                self.state.clear()
+    def take_more(self) -> None:
+        """Take every job the gateway hands out beyond the ones the script has:
+        after a restart those it already had, otherwise at most the next one.
+        Every call is also a heartbeat."""
+        while True:
+            have = [j.id for j in self.jobs]
+            job = self.api.next_job(have)
+            # A gateway from before `have` hands out the job in flight again
+            if job is None or job["id"] in have:
                 return
-            self.upload(job, seq_path, dat_path)
-            self.state.clear()
-            return
+            try:
+                self.jobs.append(self.start(job))
+            except JobEnded as e:
+                # The .seq could not be downloaded
+                self.say("job {} failed: {}".format(job["id"], e), RED)
+                try:
+                    self.report(job, "failed", str(e))
+                except JobEnded:
+                    pass
 
-        if state["stage"] == "new":
-            os.makedirs(folder, exist_ok=True)
+    def start(self, job: dict) -> Job:
+        """Write the job's `.seq` and append it to the control file, behind the
+        measurement in progress if there is one."""
+        entry = self.state.load(job["id"])
+        name = "mrx_{}.seq".format(job["id"])
+        if entry:
+            self.say("resuming job {} from {} ({})".format(job["id"], job["login"], name), BOLD, CYAN)
+        else:
+            self.say("job {} from {}: {}".format(job["id"], job["login"], name), BOLD, CYAN)
+            entry = {"date": datetime.now().strftime("%Y%m%d"), "stage": "new"}
+        new = Job(job, entry, self.args.measurement_dir)
+
+        # Restarted in the middle of an upload: the data is already there
+        if job["state"] != "uploading" and entry["stage"] == "new":
+            os.makedirs(os.path.dirname(new.seq_path), exist_ok=True)
             # Written before its line goes into the control file, so the
             # interpreter never finds a path that is not complete yet
-            write_atomic(seq_path, self.api.download(job["sequence_url"]))
+            write_atomic(new.seq_path, self.api.download(job["sequence_url"]))
             if self.args.control_file is not None:
-                line = scanner_path(self.args.scanner_measurement_dir, state["date"], name)
+                line = scanner_path(self.args.scanner_measurement_dir, entry["date"], name)
                 if append_to_control_file(self.args.control_file, line):
                     self.say("added to control file: {}".format(line))
-            state["stage"] = "measuring"
-            self.state.save(state)
-        self.report(job, "measuring")
+            entry["stage"] = "appended"
+            self.state.save(new.id, entry)
+        if self.jobs:
+            self.say("{} is measured next, after {}".format(name, self.jobs[-1].name))
+        return new
 
-        self.simulate_failed = None
-        if self.args.simulate and not os.path.exists(dat_path):
-            threading.Thread(target=self.simulate, args=(seq_path, dat_path), daemon=True).start()
+    def finish(self, job: Job) -> None:
+        """Wait for the job's data and upload it."""
+        if job.job["state"] == "uploading":
+            if not os.path.exists(job.dat_path):
+                self.report(job.job, "failed", "the script restarted and {} is gone".format(job.dat_path))
+                return
+        else:
+            # The interpreter is on it now: the one before it is done
+            self.report(job.job, "measuring")
+            self.simulate_failed = None
+            if self.args.simulate and not os.path.exists(job.dat_path):
+                threading.Thread(target=self.simulate, args=(job,), daemon=True).start()
 
-        self.say("waiting for {} (type s + Enter to skip)".format(os.path.basename(dat_path)))
-        try:
-            self.wait_for(dat_path, state)
-        except Skipped as e:
-            self.say("job {} failed: {}".format(job_id, e))
-            self.report(job, "failed", str(e))
-            self.state.clear()
-            return
+            self.say("waiting for {} (type s + Enter to skip)".format(os.path.basename(job.dat_path)))
+            try:
+                self.wait_for(job)
+            except Skipped as e:
+                self.say("job {} failed: {}".format(job.id, e), RED)
+                self.report(job.job, "failed", str(e))
+                return
 
-        self.upload(job, seq_path, dat_path)
-        self.state.clear()
+        self.in_background(self.upload, job)
 
-    def wait_for(self, dat_path: str, state: dict) -> None:
+    def wait_for(self, job: Job) -> None:
         self.skip.requested.clear()
-        started = state.setdefault("measuring_since", time.time())
-        self.state.save(state)
+        started = job.entry.setdefault("measuring_since", time.time())
+        self.state.save(job.id, job.entry)
         last_beat = [time.monotonic()]
 
         def check() -> None:
@@ -495,60 +595,86 @@ class Runner:
             if self.args.timeout and time.time() - started > self.args.timeout * 60:
                 raise Skipped("no data after {:g} minutes (--timeout)".format(self.args.timeout))
             # Measuring can take long, and the gateway counts a silent scanner
-            # as offline after 30 s
+            # as offline after 30 s. The report also hears of a job the
+            # gateway ended, and the poll takes the next job once there is one.
             if time.monotonic() - last_beat[0] >= self.args.poll_interval:
-                self.report({"id": state["job"]}, "measuring")
+                self.report(job.job, "measuring")
+                self.take_more()
                 last_beat[0] = time.monotonic()
 
-        wait_until_stable(dat_path, check)
+        wait_until_stable(job.dat_path, check)
 
-    def upload(self, job: dict, seq_path: str, dat_path: str) -> None:
+    def in_background(self, work: Callable, *args) -> None:
+        """Run `work` on a thread of its own and keep polling meanwhile: reading
+        a large `.seq.dat` and uploading can take longer than the gateway waits
+        for a sign of life, and a job that comes in meanwhile is appended
+        without waiting for the upload."""
+        errors = []  # type: List[BaseException]
+
+        def target() -> None:
+            try:
+                work(*args)
+            except BaseException as e:
+                errors.append(e)
+
+        thread = threading.Thread(target=target, daemon=True)
+        thread.start()
+        while True:
+            thread.join(self.args.poll_interval)
+            if not thread.is_alive():
+                break
+            self.take_more()
+        if errors:
+            raise errors[0]
+
+    def upload(self, job: Job) -> None:
         """Convert the `.seq.dat` and upload the signal. The `.seq.dat` itself is
         not uploaded - it is several times larger - and stays where it is."""
-        job_id = job["id"]
-        self.say("{} complete, converting".format(os.path.basename(dat_path)))
+        self.say("{} complete, converting".format(os.path.basename(job.dat_path)))
         try:
-            with open(seq_path, "r", encoding="utf-8") as f:
+            with open(job.seq_path, "r", encoding="utf-8") as f:
                 counts = adc_sample_counts(f.read())
-            with open(dat_path, "r", encoding="ascii") as f:
+            with open(job.dat_path, "r", encoding="ascii") as f:
                 signal = convert(f.read(), counts, self.args.coils, self.args.adc_padding)
+            if CONJUGATE:
+                signal = np.conj(signal)
         except (ValueError, UnicodeDecodeError) as e:
             # Whoever looks into it needs the raw file, which only the site has
-            message = "{} - the raw data stays at the site, in {}".format(e, dat_path)
-            self.say("job {} failed: {}".format(job_id, message))
-            self.report(job, "failed", message)
+            message = "{} - the raw data stays at the site, in {}".format(e, job.dat_path)
+            self.say("job {} failed: {}".format(job.id, message), RED)
+            self.report(job.job, "failed", message)
             return
 
-        if job["state"] != "uploading":
-            self.report(job, "uploading")
+        if job.job["state"] != "uploading":
+            self.report(job.job, "uploading")
         shape = signal.shape
-        self.api.upload(job_id, "signal.npy", npy_bytes(signal), {"X-Signal-Shape": "{},{}".format(*shape)})
+        self.api.upload(job.id, "signal.npy", npy_bytes(signal), {"X-Signal-Shape": "{},{}".format(*shape)})
         # The gateway has the signal now, so the job is done there. This line
-        # reaches the gateway's log with the next job's first report.
-        self.say("job {} done: signal {} x {} coils uploaded".format(job_id, *shape))
+        # reaches the gateway's log with the next report.
+        self.say("job {} done: signal {} x {} coils uploaded".format(job.id, *shape), GREEN)
 
-    def simulate(self, seq_path: str, dat_path: str) -> None:
-        """Play the interpreter: wait a bit, find the newest line in the control
-        file (if there is one), and write noise in its layout where the real data
-        would go."""
+    def simulate(self, job: Job) -> None:
+        """Play the interpreter: wait a bit, check that the job is in the
+        control file (if there is one), and write noise in its layout where the
+        real data would go. The script only calls this for the job whose turn
+        it is, as the interpreter measures one after the other."""
         time.sleep(self.args.simulate_delay)
         if self.args.control_file is not None:
+            line = scanner_path(self.args.scanner_measurement_dir, job.entry["date"], job.name)
             with open(self.args.control_file, "r") as f:
-                lines = [l.strip() for l in f if l.strip() and l.strip() != WAIT]
-            prefix = self.args.scanner_measurement_dir.replace("\\", "/").rstrip("/")
-            local = os.path.join(self.args.measurement_dir, lines[-1][len(prefix) :].lstrip("/"))
-            if os.path.normcase(os.path.normpath(local)) != os.path.normcase(os.path.normpath(seq_path)):
-                self.say("simulate: the control file's last line is not this job, writing nothing")
+                lines = [l.strip() for l in f]
+            if line not in lines:
+                self.say("simulate: this job is not in the control file, writing nothing", YELLOW)
                 return
         try:
-            with open(seq_path, "r", encoding="utf-8") as f:
+            with open(job.seq_path, "r", encoding="utf-8") as f:
                 counts = adc_sample_counts(f.read())
         except (ValueError, UnicodeDecodeError) as e:
             # What the interpreter would choke on too
-            self.simulate_failed = "simulate: cannot read {}: {}".format(os.path.basename(seq_path), e)
+            self.simulate_failed = "simulate: cannot read {}: {}".format(job.name, e)
             return
-        write_atomic(dat_path, fake_dat(counts, self.args.coils, self.args.adc_padding).encode())
-        self.say("simulate: wrote {}".format(os.path.basename(dat_path)))
+        write_atomic(job.dat_path, fake_dat(counts, self.args.coils, self.args.adc_padding).encode())
+        self.say("simulate: wrote {}".format(os.path.basename(job.dat_path)), DIM)
 
 
 # =============================================================================
@@ -658,11 +784,16 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     args = settings(argv)
     console = Console()
-    print("\nNext time, the same settings are:\n  {}\n".format(command_line(args)))
-    print("MRX scanner session of {} at {}".format(OPERATOR, BASE_URL))
-    print("Scan token (give it to who may measure here): {}\n".format(SCAN_TOKEN))
+    paint = console.paint
+    print("\nNext time, the same settings are:\n  {}\n".format(paint(command_line(args), DIM)))
+    print("MRX scanner session of {} at {}".format(paint(OPERATOR, BOLD), BASE_URL))
+    print("Scan token (give it to who may measure here): {}".format(paint(SCAN_TOKEN, BOLD, CYAN)))
+    if CONJUGATE:
+        print("Signal is complex conjugated before upload\n")
+    else:
+        print(paint("Signal is NOT complex conjugated before upload", YELLOW) + "\n")
     if args.simulate:
-        print("SIMULATING: no scanner is used, the data is noise\n")
+        print(paint("SIMULATING: no scanner is used, the data is noise", BOLD, YELLOW) + "\n")
 
     api = Api(BASE_URL, RUNNER_SECRET, console.say)
     runner = Runner(args, api, console, SkipReader().start())
@@ -670,10 +801,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         runner.run()
     except SessionEnded as e:
-        console.say(str(e) or "session expired - get a new script at {}/scanner/new".format(BASE_URL))
+        console.say(str(e) or "session expired - get a new script at {}/scanner/new".format(BASE_URL), RED)
         return 1
     except KeyboardInterrupt:
-        console.say("stopped")
+        console.say("stopped", YELLOW)
     return 0
 
 
