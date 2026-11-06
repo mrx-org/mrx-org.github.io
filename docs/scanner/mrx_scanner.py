@@ -27,6 +27,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import warnings
 from datetime import datetime
 from typing import Callable, List, Optional
 
@@ -119,34 +120,51 @@ def expected_lines(adc_counts: List[int], coils: int, padding: int) -> int:
     return coils * sum(n + padding for n in adc_counts)
 
 
-def convert(dat_text: str, adc_counts: List[int], coils: int, padding: int) -> np.ndarray:
-    """The signal as complex64 of shape `(ADC samples, coils)`. Raises
-    `ValueError` if the file does not have the layout the arguments describe -
+def read_dat(dat) -> np.ndarray:
+    """Every `<re> <im>` line of a `.seq.dat` (a path or an open text file) as
+    one flat complex64 array, in file order. `np.loadtxt` parses straight into
+    float32, so a large file costs about its signal's size in memory rather
+    than the several times that splitting its text does. Raises `ValueError` if
+    a line is not two numbers."""
+    try:
+        with warnings.catch_warnings():
+            # An empty file is no different from one cut short: `convert` says so
+            warnings.simplefilter("ignore", UserWarning)
+            values = np.loadtxt(dat, dtype=np.float32, ndmin=2)
+    except ValueError as e:
+        # Without numpy's advice to use `usecols`, which is not ours to take
+        raise ValueError("every line of the .seq.dat must be '<re> <im>': {}".format(str(e).split(";")[0]))
+    if values.size == 0:
+        return np.zeros(0, dtype="<c8")
+    if values.shape[1] != 2:
+        raise ValueError("every line of the .seq.dat must be '<re> <im>', these have {} values".format(values.shape[1]))
+    return np.ascontiguousarray(values, dtype="<f4").view("<c8").ravel()
+
+
+def convert(samples: np.ndarray, adc_counts: List[int], coils: int, padding: int) -> np.ndarray:
+    """The samples from `read_dat` as complex64 of shape `(ADC samples, coils)`.
+    Raises `ValueError` if they do not have the layout the arguments describe -
     the usual cause is a wrong `--coils` or `--adc-padding`, or a file that was
     cut short."""
-    values = np.array(dat_text.split(), dtype=np.float64)
     expected = expected_lines(adc_counts, coils, padding)
-    if len(values) % 2 != 0:
-        raise ValueError("the .seq.dat has an odd number of values, every line must be '<re> <im>'")
-    if len(values) // 2 != expected:
+    if len(samples) != expected:
         raise ValueError(
             "the .seq.dat has {} lines, but {} coils x (ADC samples + {} padding) "
             "for this sequence make {} - check --coils and --adc-padding".format(
-                len(values) // 2, coils, padding, expected
+                len(samples), coils, padding, expected
             )
         )
 
-    signal = values[0::2] + 1j * values[1::2]
     parts, offset = [], 0
     for n in adc_counts:
         # One ADC is `coils` readouts of `n + padding` samples in a row; its
         # transpose without the padding is `n` rows of the output.
-        block = signal[offset : offset + coils * (n + padding)].reshape(coils, n + padding)
+        block = samples[offset : offset + coils * (n + padding)].reshape(coils, n + padding)
         parts.append(block[:, :n].T)
         offset += coils * (n + padding)
     if not parts:
         return np.zeros((0, coils), dtype="<c8")
-    return np.concatenate(parts).astype("<c8")
+    return np.concatenate(parts).astype("<c8", copy=False)
 
 
 def npy_bytes(signal: np.ndarray) -> bytes:
@@ -635,9 +653,11 @@ class Runner:
             with open(job.seq_path, "r", encoding="utf-8") as f:
                 counts = adc_sample_counts(f.read())
             with open(job.dat_path, "r", encoding="ascii") as f:
-                signal = convert(f.read(), counts, self.args.coils, self.args.adc_padding)
+                samples = read_dat(f)
+            signal = convert(samples, counts, self.args.coils, self.args.adc_padding)
+            del samples
             if CONJUGATE:
-                signal = np.conj(signal)
+                np.conjugate(signal, out=signal)
         except (ValueError, UnicodeDecodeError) as e:
             # Whoever looks into it needs the raw file, which only the site has
             message = "{} - the raw data stays at the site, in {}".format(e, job.dat_path)
@@ -792,6 +812,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("Signal is complex conjugated before upload\n")
     else:
         print(paint("Signal is NOT complex conjugated before upload", YELLOW) + "\n")
+    if tuple(int(p) for p in np.__version__.split(".")[:2] if p.isdigit()) < (1, 23):
+        # `np.loadtxt` only has a fast parser since 1.23
+        print(paint("numpy {} reads large .seq.dat files slowly - numpy 1.23 or newer is much faster".format(np.__version__), YELLOW) + "\n")
     if args.simulate:
         print(paint("SIMULATING: no scanner is used, the data is noise", BOLD, YELLOW) + "\n")
 
