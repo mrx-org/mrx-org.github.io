@@ -20,6 +20,7 @@ import io
 import json
 import os
 import random
+import re
 import socket
 import sys
 import tempfile
@@ -27,6 +28,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import warnings
 from datetime import datetime
 from typing import Callable, List, Optional
 
@@ -119,34 +121,58 @@ def expected_lines(adc_counts: List[int], coils: int, padding: int) -> int:
     return coils * sum(n + padding for n in adc_counts)
 
 
-def convert(dat_text: str, adc_counts: List[int], coils: int, padding: int) -> np.ndarray:
-    """The signal as complex64 of shape `(ADC samples, coils)`. Raises
-    `ValueError` if the file does not have the layout the arguments describe -
+def numpy_too_old_for_fast_loadtxt(version: Optional[str] = None) -> bool:
+    """Whether numpy (or `version`) is older than 1.23, the first with a fast
+    `np.loadtxt`, which `read_dat` relies on for large files."""
+    m = re.match(r"(\d+)\.(\d+)", version or np.__version__)
+    return m is not None and (int(m.group(1)), int(m.group(2))) < (1, 23)
+
+
+def read_dat(dat) -> np.ndarray:
+    """Every `<re> <im>` line of a `.seq.dat` (a path or an open text file) as
+    one flat complex64 array, in file order. `np.loadtxt` parses straight into
+    float32, so a large file costs about its signal's size in memory rather
+    than the several times that splitting its text does. Raises `ValueError` if
+    a line is not two numbers."""
+    try:
+        with warnings.catch_warnings():
+            # An empty file is no different from one cut short: `convert` says so
+            warnings.simplefilter("ignore", UserWarning)
+            values = np.loadtxt(dat, dtype=np.float32, ndmin=2)
+    except ValueError as e:
+        # Without numpy's advice to use `usecols`, which is not ours to take
+        raise ValueError("every line of the .seq.dat must be '<re> <im>': {}".format(str(e).split(";")[0]))
+    if values.size == 0:
+        return np.zeros(0, dtype="<c8")
+    if values.shape[1] != 2:
+        raise ValueError("every line of the .seq.dat must be '<re> <im>', these have {} values".format(values.shape[1]))
+    return np.ascontiguousarray(values, dtype="<f4").view("<c8").ravel()
+
+
+def convert(samples: np.ndarray, adc_counts: List[int], coils: int, padding: int) -> np.ndarray:
+    """The samples from `read_dat` as complex64 of shape `(ADC samples, coils)`.
+    Raises `ValueError` if they do not have the layout the arguments describe -
     the usual cause is a wrong `--coils` or `--adc-padding`, or a file that was
     cut short."""
-    values = np.array(dat_text.split(), dtype=np.float64)
     expected = expected_lines(adc_counts, coils, padding)
-    if len(values) % 2 != 0:
-        raise ValueError("the .seq.dat has an odd number of values, every line must be '<re> <im>'")
-    if len(values) // 2 != expected:
+    if len(samples) != expected:
         raise ValueError(
             "the .seq.dat has {} lines, but {} coils x (ADC samples + {} padding) "
             "for this sequence make {} - check --coils and --adc-padding".format(
-                len(values) // 2, coils, padding, expected
+                len(samples), coils, padding, expected
             )
         )
 
-    signal = values[0::2] + 1j * values[1::2]
     parts, offset = [], 0
     for n in adc_counts:
         # One ADC is `coils` readouts of `n + padding` samples in a row; its
         # transpose without the padding is `n` rows of the output.
-        block = signal[offset : offset + coils * (n + padding)].reshape(coils, n + padding)
+        block = samples[offset : offset + coils * (n + padding)].reshape(coils, n + padding)
         parts.append(block[:, :n].T)
         offset += coils * (n + padding)
     if not parts:
         return np.zeros((0, coils), dtype="<c8")
-    return np.concatenate(parts).astype("<c8")
+    return np.concatenate(parts).astype("<c8", copy=False)
 
 
 def npy_bytes(signal: np.ndarray) -> bytes:
@@ -346,13 +372,40 @@ def _enable_windows_colors() -> bool:
 
 def colors_supported(stream=None) -> bool:
     """Colors only on a terminal that shows them - not when the output goes to
-    a file, nor with `NO_COLOR` set (https://no-color.org)."""
+    a file, nor with `NO_COLOR` set (https://no-color.org). `FORCE_COLOR` turns
+    them on regardless."""
     stream = stream or sys.stdout
-    if os.environ.get("NO_COLOR") or not getattr(stream, "isatty", lambda: False)():
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    if type(stream).__module__.startswith("ipykernel"):
+        # Spyder's IPython console and Jupyter show colors, but their stdout
+        # is no terminal and says so via `isatty()`
+        return True
+    if not getattr(stream, "isatty", lambda: False)():
         return False
     if os.name == "nt":
         return _enable_windows_colors()
     return os.environ.get("TERM") != "dumb"
+
+
+def size(n_bytes: int) -> str:
+    for unit, scale in (("GB", 1e9), ("MB", 1e6), ("kB", 1e3)):
+        if n_bytes >= scale:
+            return "{:.1f} {}".format(n_bytes / scale, unit)
+    return "{} B".format(n_bytes)
+
+
+def took(since: float) -> str:
+    """How long ago the `time.monotonic()` value `since` was."""
+    return duration(time.monotonic() - since)
+
+
+def duration(seconds: float) -> str:
+    if seconds < 60:
+        return "{:.1f} s".format(seconds)
+    return "{:d} min {:02d} s".format(int(seconds // 60), int(seconds % 60))
 
 
 class Console:
@@ -547,7 +600,10 @@ class Runner:
             os.makedirs(os.path.dirname(new.seq_path), exist_ok=True)
             # Written before its line goes into the control file, so the
             # interpreter never finds a path that is not complete yet
-            write_atomic(new.seq_path, self.api.download(job["sequence_url"]))
+            t = time.monotonic()
+            seq = self.api.download(job["sequence_url"])
+            write_atomic(new.seq_path, seq)
+            self.say("downloaded {} ({}) in {}".format(name, size(len(seq)), took(t)), DIM)
             if self.args.control_file is not None:
                 line = scanner_path(self.args.scanner_measurement_dir, entry["date"], name)
                 if append_to_control_file(self.args.control_file, line):
@@ -578,6 +634,16 @@ class Runner:
                 self.say("job {} failed: {}".format(job.id, e), RED)
                 self.report(job.job, "failed", str(e))
                 return
+            # Counted from when the job's turn came, so it includes the
+            # interpreter starting up and the file settling
+            self.say(
+                "{} complete ({}) after {} of measuring".format(
+                    os.path.basename(job.dat_path),
+                    size(os.path.getsize(job.dat_path)),
+                    duration(time.time() - job.entry["measuring_since"]),
+                ),
+                DIM,
+            )
 
         self.in_background(self.upload, job)
 
@@ -630,14 +696,26 @@ class Runner:
     def upload(self, job: Job) -> None:
         """Convert the `.seq.dat` and upload the signal. The `.seq.dat` itself is
         not uploaded - it is several times larger - and stays where it is."""
-        self.say("{} complete, converting".format(os.path.basename(job.dat_path)))
+        dat_name = os.path.basename(job.dat_path)
         try:
             with open(job.seq_path, "r", encoding="utf-8") as f:
                 counts = adc_sample_counts(f.read())
+            self.say("parsing {} ({})".format(dat_name, size(os.path.getsize(job.dat_path))), DIM)
+            t = time.monotonic()
             with open(job.dat_path, "r", encoding="ascii") as f:
-                signal = convert(f.read(), counts, self.args.coils, self.args.adc_padding)
+                samples = read_dat(f)
+            self.say("parsed {} lines in {}, converting".format(len(samples), took(t)), DIM)
+            t = time.monotonic()
+            signal = convert(samples, counts, self.args.coils, self.args.adc_padding)
+            del samples
             if CONJUGATE:
-                signal = np.conj(signal)
+                np.conjugate(signal, out=signal)
+            self.say(
+                "converted to {} x {} coils ({} ADCs{}) in {}".format(
+                    signal.shape[0], signal.shape[1], len(counts), ", conjugated" if CONJUGATE else "", took(t)
+                ),
+                DIM,
+            )
         except (ValueError, UnicodeDecodeError) as e:
             # Whoever looks into it needs the raw file, which only the site has
             message = "{} - the raw data stays at the site, in {}".format(e, job.dat_path)
@@ -648,7 +726,15 @@ class Runner:
         if job.job["state"] != "uploading":
             self.report(job.job, "uploading")
         shape = signal.shape
-        self.api.upload(job.id, "signal.npy", npy_bytes(signal), {"X-Signal-Shape": "{},{}".format(*shape)})
+        data = npy_bytes(signal)
+        del signal
+        self.say("uploading signal.npy ({})".format(size(len(data))), DIM)
+        t = time.monotonic()
+        self.api.upload(job.id, "signal.npy", data, {"X-Signal-Shape": "{},{}".format(*shape)})
+        seconds = time.monotonic() - t
+        self.say(
+            "uploaded in {} ({:.1f} MB/s)".format(duration(seconds), len(data) / 1e6 / max(seconds, 1e-3)), DIM
+        )
         # The gateway has the signal now, so the job is done there. This line
         # reaches the gateway's log with the next report.
         self.say("job {} done: signal {} x {} coils uploaded".format(job.id, *shape), GREEN)
@@ -792,6 +878,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("Signal is complex conjugated before upload\n")
     else:
         print(paint("Signal is NOT complex conjugated before upload", YELLOW) + "\n")
+    if numpy_too_old_for_fast_loadtxt():
+        # `np.loadtxt` only has a fast parser (in C) since 1.23; before that it
+        # is pure Python, slow and several times as hungry for memory
+        bar = "!" * 72
+        lines = [
+            bar,
+            "WARNING: numpy {} is old (older than 1.23)".format(np.__version__),
+            "Reading back large signals (.seq.dat) may be very slow and use a lot",
+            "of memory. Update numpy to 1.23 or newer if you can.",
+            bar,
+        ]
+        print("\n".join(paint(line, BOLD, RED) for line in lines) + "\n")
     if args.simulate:
         print(paint("SIMULATING: no scanner is used, the data is noise", BOLD, YELLOW) + "\n")
 
