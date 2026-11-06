@@ -20,6 +20,7 @@ import io
 import json
 import os
 import random
+import re
 import socket
 import sys
 import tempfile
@@ -118,6 +119,13 @@ def adc_sample_counts(seq_text: str) -> List[int]:
 
 def expected_lines(adc_counts: List[int], coils: int, padding: int) -> int:
     return coils * sum(n + padding for n in adc_counts)
+
+
+def numpy_too_old_for_fast_loadtxt(version: Optional[str] = None) -> bool:
+    """Whether numpy (or `version`) is older than 1.23, the first with a fast
+    `np.loadtxt`, which `read_dat` relies on for large files."""
+    m = re.match(r"(\d+)\.(\d+)", version or np.__version__)
+    return m is not None and (int(m.group(1)), int(m.group(2))) < (1, 23)
 
 
 def read_dat(dat) -> np.ndarray:
@@ -364,13 +372,40 @@ def _enable_windows_colors() -> bool:
 
 def colors_supported(stream=None) -> bool:
     """Colors only on a terminal that shows them - not when the output goes to
-    a file, nor with `NO_COLOR` set (https://no-color.org)."""
+    a file, nor with `NO_COLOR` set (https://no-color.org). `FORCE_COLOR` turns
+    them on regardless."""
     stream = stream or sys.stdout
-    if os.environ.get("NO_COLOR") or not getattr(stream, "isatty", lambda: False)():
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    if type(stream).__module__.startswith("ipykernel"):
+        # Spyder's IPython console and Jupyter show colors, but their stdout
+        # is no terminal and says so via `isatty()`
+        return True
+    if not getattr(stream, "isatty", lambda: False)():
         return False
     if os.name == "nt":
         return _enable_windows_colors()
     return os.environ.get("TERM") != "dumb"
+
+
+def size(n_bytes: int) -> str:
+    for unit, scale in (("GB", 1e9), ("MB", 1e6), ("kB", 1e3)):
+        if n_bytes >= scale:
+            return "{:.1f} {}".format(n_bytes / scale, unit)
+    return "{} B".format(n_bytes)
+
+
+def took(since: float) -> str:
+    """How long ago the `time.monotonic()` value `since` was."""
+    return duration(time.monotonic() - since)
+
+
+def duration(seconds: float) -> str:
+    if seconds < 60:
+        return "{:.1f} s".format(seconds)
+    return "{:d} min {:02d} s".format(int(seconds // 60), int(seconds % 60))
 
 
 class Console:
@@ -565,7 +600,10 @@ class Runner:
             os.makedirs(os.path.dirname(new.seq_path), exist_ok=True)
             # Written before its line goes into the control file, so the
             # interpreter never finds a path that is not complete yet
-            write_atomic(new.seq_path, self.api.download(job["sequence_url"]))
+            t = time.monotonic()
+            seq = self.api.download(job["sequence_url"])
+            write_atomic(new.seq_path, seq)
+            self.say("downloaded {} ({}) in {}".format(name, size(len(seq)), took(t)), DIM)
             if self.args.control_file is not None:
                 line = scanner_path(self.args.scanner_measurement_dir, entry["date"], name)
                 if append_to_control_file(self.args.control_file, line):
@@ -596,6 +634,16 @@ class Runner:
                 self.say("job {} failed: {}".format(job.id, e), RED)
                 self.report(job.job, "failed", str(e))
                 return
+            # Counted from when the job's turn came, so it includes the
+            # interpreter starting up and the file settling
+            self.say(
+                "{} complete ({}) after {} of measuring".format(
+                    os.path.basename(job.dat_path),
+                    size(os.path.getsize(job.dat_path)),
+                    duration(time.time() - job.entry["measuring_since"]),
+                ),
+                DIM,
+            )
 
         self.in_background(self.upload, job)
 
@@ -648,16 +696,26 @@ class Runner:
     def upload(self, job: Job) -> None:
         """Convert the `.seq.dat` and upload the signal. The `.seq.dat` itself is
         not uploaded - it is several times larger - and stays where it is."""
-        self.say("{} complete, converting".format(os.path.basename(job.dat_path)))
+        dat_name = os.path.basename(job.dat_path)
         try:
             with open(job.seq_path, "r", encoding="utf-8") as f:
                 counts = adc_sample_counts(f.read())
+            self.say("parsing {} ({})".format(dat_name, size(os.path.getsize(job.dat_path))), DIM)
+            t = time.monotonic()
             with open(job.dat_path, "r", encoding="ascii") as f:
                 samples = read_dat(f)
+            self.say("parsed {} lines in {}, converting".format(len(samples), took(t)), DIM)
+            t = time.monotonic()
             signal = convert(samples, counts, self.args.coils, self.args.adc_padding)
             del samples
             if CONJUGATE:
                 np.conjugate(signal, out=signal)
+            self.say(
+                "converted to {} x {} coils ({} ADCs{}) in {}".format(
+                    signal.shape[0], signal.shape[1], len(counts), ", conjugated" if CONJUGATE else "", took(t)
+                ),
+                DIM,
+            )
         except (ValueError, UnicodeDecodeError) as e:
             # Whoever looks into it needs the raw file, which only the site has
             message = "{} - the raw data stays at the site, in {}".format(e, job.dat_path)
@@ -668,7 +726,15 @@ class Runner:
         if job.job["state"] != "uploading":
             self.report(job.job, "uploading")
         shape = signal.shape
-        self.api.upload(job.id, "signal.npy", npy_bytes(signal), {"X-Signal-Shape": "{},{}".format(*shape)})
+        data = npy_bytes(signal)
+        del signal
+        self.say("uploading signal.npy ({})".format(size(len(data))), DIM)
+        t = time.monotonic()
+        self.api.upload(job.id, "signal.npy", data, {"X-Signal-Shape": "{},{}".format(*shape)})
+        seconds = time.monotonic() - t
+        self.say(
+            "uploaded in {} ({:.1f} MB/s)".format(duration(seconds), len(data) / 1e6 / max(seconds, 1e-3)), DIM
+        )
         # The gateway has the signal now, so the job is done there. This line
         # reaches the gateway's log with the next report.
         self.say("job {} done: signal {} x {} coils uploaded".format(job.id, *shape), GREEN)
@@ -812,9 +878,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("Signal is complex conjugated before upload\n")
     else:
         print(paint("Signal is NOT complex conjugated before upload", YELLOW) + "\n")
-    if tuple(int(p) for p in np.__version__.split(".")[:2] if p.isdigit()) < (1, 23):
-        # `np.loadtxt` only has a fast parser since 1.23
-        print(paint("numpy {} reads large .seq.dat files slowly - numpy 1.23 or newer is much faster".format(np.__version__), YELLOW) + "\n")
+    if numpy_too_old_for_fast_loadtxt():
+        # `np.loadtxt` only has a fast parser (in C) since 1.23; before that it
+        # is pure Python, slow and several times as hungry for memory
+        bar = "!" * 72
+        lines = [
+            bar,
+            "WARNING: numpy {} is old (older than 1.23)".format(np.__version__),
+            "Reading back large signals (.seq.dat) may be very slow and use a lot",
+            "of memory. Update numpy to 1.23 or newer if you can.",
+            bar,
+        ]
+        print("\n".join(paint(line, BOLD, RED) for line in lines) + "\n")
     if args.simulate:
         print(paint("SIMULATING: no scanner is used, the data is noise", BOLD, YELLOW) + "\n")
 
