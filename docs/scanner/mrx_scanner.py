@@ -184,6 +184,28 @@ def npy_bytes(signal: np.ndarray) -> bytes:
     return out.getvalue()
 
 
+def npy_shape(path: str) -> Optional[Tuple[int, int]]:
+    """The shape of a signal saved by `upload`, from the `.npy` header alone -
+    None if the file is not a complete 2-D complex64 `.npy` (then it is
+    converted again)."""
+    try:
+        with open(path, "rb") as f:
+            version = np.lib.format.read_magic(f)
+            if version == (1, 0):
+                shape, _, dtype = np.lib.format.read_array_header_1_0(f)
+            else:
+                shape, _, dtype = np.lib.format.read_array_header_2_0(f)
+            header_end = f.tell()
+    except (OSError, ValueError):
+        return None
+    # Fortran order is fine: `convert` usually returns that, the shape is the same
+    if len(shape) != 2 or dtype != np.dtype("<c8"):
+        return None
+    if os.path.getsize(path) != header_end + shape[0] * shape[1] * dtype.itemsize:
+        return None
+    return int(shape[0]), int(shape[1])
+
+
 def fake_dat(adc_counts: List[int], coils: int, padding: int, rng: "random.Random" = None) -> str:
     """Noise in the interpreter's layout, which is what `--simulate` writes in
     place of a measurement - so the conversion above runs on it too."""
@@ -630,6 +652,8 @@ class Job:
         self.name = "mrx_{}.seq".format(self.id)
         self.seq_path = os.path.join(measurement_dir, entry["date"], self.name)
         self.dat_path = self.seq_path + ".dat"
+        # The converted signal, kept so it survives a failed upload or a restart
+        self.npy_path = self.seq_path + ".signal.npy"
 
 
 class Runner:
@@ -718,7 +742,7 @@ class Runner:
     def finish(self, job: Job) -> None:
         """Wait for the job's data and upload it."""
         if job.job["state"] == "uploading":
-            if not os.path.exists(job.dat_path):
+            if not os.path.exists(job.dat_path) and npy_shape(job.npy_path) is None:
                 self.report(job.job, "failed", "the script restarted and {} is gone".format(job.dat_path))
                 return
         else:
@@ -795,8 +819,46 @@ class Runner:
             raise errors[0]
 
     def upload(self, job: Job) -> None:
-        """Convert the `.seq.dat` and upload the signal. The `.seq.dat` itself is
-        not uploaded - it is several times larger - and stays where it is."""
+        """Convert the `.seq.dat`, save the signal next to it and upload it.
+        The `.seq.dat` itself is not uploaded - it is several times larger - and
+        stays where it is, as does the saved signal: if the upload fails, it can
+        be copied off the PC some other way. A script restarted in the middle of
+        an upload takes the saved signal rather than converting again."""
+        npy_name = os.path.basename(job.npy_path)
+        shape = npy_shape(job.npy_path) if job.job["state"] == "uploading" else None
+        if shape is not None:
+            with open(job.npy_path, "rb") as f:
+                data = f.read()
+            self.say("reusing {} ({}) from before the restart".format(npy_name, size(len(data))), DIM)
+        else:
+            converted = self.convert_dat(job)
+            if converted is None:
+                return
+            shape, data = converted
+            try:
+                write_atomic(job.npy_path, data)
+                self.say("saved signal.npy as {}".format(job.npy_path), DIM)
+            except OSError as e:
+                # Not worth losing the upload over
+                self.say("could not save signal.npy as {}: {}".format(job.npy_path, e), YELLOW)
+
+        if job.job["state"] != "uploading":
+            self.report(job.job, "uploading")
+        self.say("uploading signal.npy ({})".format(size(len(data))), DIM)
+        try:
+            report = self.api.upload(job.id, "signal.npy", data, {"X-Signal-Shape": "{},{}".format(*shape)})
+        except (JobEnded, SessionEnded):
+            if os.path.exists(job.npy_path):
+                self.say("signal.npy was not uploaded, it is kept at {}".format(job.npy_path), YELLOW)
+            raise
+        self.say("uploaded signal.npy: {}".format(report), DIM)
+        # The gateway has the signal now, so the job is done there. This line
+        # reaches the gateway's log with the next report.
+        self.say("job {} done: signal {} x {} coils uploaded".format(job.id, *shape), GREEN)
+
+    def convert_dat(self, job: Job) -> Optional[Tuple[Tuple[int, int], bytes]]:
+        """The job's `.seq.dat` as `(shape, .npy contents)` of the signal, or
+        None if it could not be converted (the job is failed then)."""
         dat_name = os.path.basename(job.dat_path)
         try:
             with open(job.seq_path, "r", encoding="utf-8") as f:
@@ -822,19 +884,12 @@ class Runner:
             message = "{} - the raw data stays at the site, in {}".format(e, job.dat_path)
             self.say("job {} failed: {}".format(job.id, message), RED)
             self.report(job.job, "failed", message)
-            return
+            return None
 
-        if job.job["state"] != "uploading":
-            self.report(job.job, "uploading")
         shape = signal.shape
         data = npy_bytes(signal)
         del signal
-        self.say("uploading signal.npy ({})".format(size(len(data))), DIM)
-        report = self.api.upload(job.id, "signal.npy", data, {"X-Signal-Shape": "{},{}".format(*shape)})
-        self.say("uploaded signal.npy: {}".format(report), DIM)
-        # The gateway has the signal now, so the job is done there. This line
-        # reaches the gateway's log with the next report.
-        self.say("job {} done: signal {} x {} coils uploaded".format(job.id, *shape), GREEN)
+        return shape, data
 
     def simulate(self, job: Job) -> None:
         """Play the interpreter: wait a bit, check that the job is in the
