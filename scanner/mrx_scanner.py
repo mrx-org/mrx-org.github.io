@@ -16,6 +16,7 @@ Everything that runs lives behind functions, so that it can be imported to test.
 
 import argparse
 import hashlib
+import http.client
 import io
 import json
 import os
@@ -27,10 +28,11 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import warnings
 from datetime import datetime
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 import numpy as np
 
@@ -283,6 +285,80 @@ class JobEnded(Exception):
     for an offline scanner, or its session ended), so it is dropped here."""
 
 
+def timed_connection(base, timings: dict):
+    """`base` (an `http.client` connection class) that writes into `timings`
+    when it finished connecting (TCP, proxy tunnel and TLS: "connected") and
+    when it last sent something ("sent"), so a transfer can be told apart from
+    setting up the connection."""
+
+    class Timed(base):
+        def connect(self):
+            super().connect()
+            timings["connected"] = time.monotonic()
+
+        def send(self, data):
+            super().send(data)
+            timings["sent"] = time.monotonic()
+
+    return Timed
+
+
+def timed_opener(timings: dict):
+    """A urllib opener like `urlopen`'s - same proxies - that times its
+    connections into `timings`."""
+
+    class Http(urllib.request.HTTPHandler):
+        def http_open(self, req):
+            return self.do_open(timed_connection(http.client.HTTPConnection, timings), req)
+
+    class Https(urllib.request.HTTPSHandler):
+        def https_open(self, req):
+            # No context, like `urlopen`'s handler: the default one checks the certificate
+            return self.do_open(timed_connection(http.client.HTTPSConnection, timings), req)
+
+    return urllib.request.build_opener(Http, Https)
+
+
+def transfer_report(n_bytes: int, timings: dict, upload: bool) -> str:
+    """Where the time of a request went: setting up the connection, the
+    transfer itself and waiting for the server. The rate counts the transfer
+    alone, so it is the line's, not the server's or the handshake's.
+
+    For an upload the transfer runs from connected to the body sent, then the
+    server checks it before it answers. For a download the server answers
+    first, then the body is read."""
+    start, connected = timings["start"], timings.get("connected", timings["start"])
+    sent, response, done = timings.get("sent", connected), timings["response"], timings["done"]
+    if upload:
+        transfer, server = sent - connected, response - sent
+    else:
+        transfer, server = done - response, response - sent
+    return "{} in {}: connecting {}, transfer {} ({:.1f} MB/s), server {}".format(
+        size(n_bytes),
+        duration(done - start),
+        duration(connected - start),
+        duration(transfer),
+        n_bytes / 1e6 / max(transfer, 1e-3),
+        duration(server),
+    )
+
+
+def proxies() -> str:
+    """The proxies urllib uses (environment, or the system settings on Windows
+    and macOS), without passwords."""
+    found = urllib.request.getproxies()
+    if not found:
+        return "none (direct connection)"
+
+    def hide_password(url: str) -> str:
+        parts = urllib.parse.urlsplit(url)
+        if "@" not in parts.netloc:
+            return url
+        return urllib.parse.urlunsplit(parts._replace(netloc="***@" + parts.netloc.rsplit("@", 1)[1]))
+
+    return ", ".join("{}={}".format(scheme, hide_password(url)) for scheme, url in sorted(found.items()))
+
+
 class Api:
     """`/scanner/api/*`, authenticated by the runner secret. Network failures and
     server errors are retried with backoff for as long as it takes (the site's
@@ -293,8 +369,19 @@ class Api:
         self.secret = secret
         self.say = say
 
-    def request(self, method: str, path: str, data: Optional[bytes] = None, headers: Optional[dict] = None, auth: bool = True, timeout: float = 60):
-        """`(status, body)` of the response."""
+    def request(
+        self,
+        method: str,
+        path: str,
+        data: Optional[bytes] = None,
+        headers: Optional[dict] = None,
+        auth: bool = True,
+        timeout: float = 60,
+        timings: Optional[dict] = None,
+    ):
+        """`(status, body)` of the response. A `timings` dict gets the
+        `time.monotonic()` of the successful attempt's steps (see
+        `transfer_report`)."""
         url = path if path.startswith("http") else self.base_url + path
         headers = dict(headers or {})
         if auth:
@@ -303,8 +390,16 @@ class Api:
         while True:
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
-                with urllib.request.urlopen(req, timeout=timeout) as res:
-                    return res.status, res.read()
+                if timings is None:
+                    with urllib.request.urlopen(req, timeout=timeout) as res:
+                        return res.status, res.read()
+                timings.clear()
+                timings["start"] = time.monotonic()
+                with timed_opener(timings).open(req, timeout=timeout) as res:
+                    timings["response"] = time.monotonic()
+                    body = res.read()
+                    timings["done"] = time.monotonic()
+                    return res.status, body
             except urllib.error.HTTPError as e:
                 body = e.read().decode("utf-8", "replace")
                 if e.code in (401, 410):
@@ -334,15 +429,22 @@ class Api:
             {"Content-Type": "application/json"},
         )
 
-    def upload(self, job_id: str, name: str, data: bytes, headers: Optional[dict] = None) -> None:
+    def upload(self, job_id: str, name: str, data: bytes, headers: Optional[dict] = None) -> str:
+        """Upload `data`; returns where the time went (`transfer_report`)."""
         headers = dict(headers or {})
         headers["X-Content-SHA256"] = hashlib.sha256(data).hexdigest()
         headers["Content-Type"] = "application/octet-stream"
-        self.request("PUT", "/scanner/api/jobs/{}/files/{}".format(job_id, name), data, headers, timeout=600)
+        timings = {}
+        path = "/scanner/api/jobs/{}/files/{}".format(job_id, name)
+        self.request("PUT", path, data, headers, timeout=600, timings=timings)
+        return transfer_report(len(data), timings, upload=True)
 
-    def download(self, url: str) -> bytes:
+    def download(self, url: str) -> Tuple[bytes, str]:
+        """The file at `url` and where the time went (`transfer_report`)."""
         # The files route needs no credentials, the hash is the permission
-        return self.request("GET", url, auth=False)[1]
+        timings = {}
+        body = self.request("GET", url, auth=False, timings=timings)[1]
+        return body, transfer_report(len(body), timings, upload=False)
 
 
 # =============================================================================
@@ -600,10 +702,9 @@ class Runner:
             os.makedirs(os.path.dirname(new.seq_path), exist_ok=True)
             # Written before its line goes into the control file, so the
             # interpreter never finds a path that is not complete yet
-            t = time.monotonic()
-            seq = self.api.download(job["sequence_url"])
+            seq, report = self.api.download(job["sequence_url"])
             write_atomic(new.seq_path, seq)
-            self.say("downloaded {} ({}) in {}".format(name, size(len(seq)), took(t)), DIM)
+            self.say("downloaded {}: {}".format(name, report), DIM)
             if self.args.control_file is not None:
                 line = scanner_path(self.args.scanner_measurement_dir, entry["date"], name)
                 if append_to_control_file(self.args.control_file, line):
@@ -729,12 +830,8 @@ class Runner:
         data = npy_bytes(signal)
         del signal
         self.say("uploading signal.npy ({})".format(size(len(data))), DIM)
-        t = time.monotonic()
-        self.api.upload(job.id, "signal.npy", data, {"X-Signal-Shape": "{},{}".format(*shape)})
-        seconds = time.monotonic() - t
-        self.say(
-            "uploaded in {} ({:.1f} MB/s)".format(duration(seconds), len(data) / 1e6 / max(seconds, 1e-3)), DIM
-        )
+        report = self.api.upload(job.id, "signal.npy", data, {"X-Signal-Shape": "{},{}".format(*shape)})
+        self.say("uploaded signal.npy: {}".format(report), DIM)
         # The gateway has the signal now, so the job is done there. This line
         # reaches the gateway's log with the next report.
         self.say("job {} done: signal {} x {} coils uploaded".format(job.id, *shape), GREEN)
@@ -874,6 +971,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("\nNext time, the same settings are:\n  {}\n".format(paint(command_line(args), DIM)))
     print("MRX scanner session of {} at {}".format(paint(OPERATOR, BOLD), BASE_URL))
     print("Scan token (give it to who may measure here): {}".format(paint(SCAN_TOKEN, BOLD, CYAN)))
+    print("Proxies: {}".format(proxies()))
     if CONJUGATE:
         print("Signal is complex conjugated before upload\n")
     else:
