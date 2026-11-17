@@ -16,19 +16,23 @@ Everything that runs lives behind functions, so that it can be imported to test.
 
 import argparse
 import hashlib
+import http.client
 import io
 import json
 import os
 import random
+import re
 import socket
 import sys
 import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
+import warnings
 from datetime import datetime
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 import numpy as np
 
@@ -119,34 +123,58 @@ def expected_lines(adc_counts: List[int], coils: int, padding: int) -> int:
     return coils * sum(n + padding for n in adc_counts)
 
 
-def convert(dat_text: str, adc_counts: List[int], coils: int, padding: int) -> np.ndarray:
-    """The signal as complex64 of shape `(ADC samples, coils)`. Raises
-    `ValueError` if the file does not have the layout the arguments describe -
+def numpy_too_old_for_fast_loadtxt(version: Optional[str] = None) -> bool:
+    """Whether numpy (or `version`) is older than 1.23, the first with a fast
+    `np.loadtxt`, which `read_dat` relies on for large files."""
+    m = re.match(r"(\d+)\.(\d+)", version or np.__version__)
+    return m is not None and (int(m.group(1)), int(m.group(2))) < (1, 23)
+
+
+def read_dat(dat) -> np.ndarray:
+    """Every `<re> <im>` line of a `.seq.dat` (a path or an open text file) as
+    one flat complex64 array, in file order. `np.loadtxt` parses straight into
+    float32, so a large file costs about its signal's size in memory rather
+    than the several times that splitting its text does. Raises `ValueError` if
+    a line is not two numbers."""
+    try:
+        with warnings.catch_warnings():
+            # An empty file is no different from one cut short: `convert` says so
+            warnings.simplefilter("ignore", UserWarning)
+            values = np.loadtxt(dat, dtype=np.float32, ndmin=2)
+    except ValueError as e:
+        # Without numpy's advice to use `usecols`, which is not ours to take
+        raise ValueError("every line of the .seq.dat must be '<re> <im>': {}".format(str(e).split(";")[0]))
+    if values.size == 0:
+        return np.zeros(0, dtype="<c8")
+    if values.shape[1] != 2:
+        raise ValueError("every line of the .seq.dat must be '<re> <im>', these have {} values".format(values.shape[1]))
+    return np.ascontiguousarray(values, dtype="<f4").view("<c8").ravel()
+
+
+def convert(samples: np.ndarray, adc_counts: List[int], coils: int, padding: int) -> np.ndarray:
+    """The samples from `read_dat` as complex64 of shape `(ADC samples, coils)`.
+    Raises `ValueError` if they do not have the layout the arguments describe -
     the usual cause is a wrong `--coils` or `--adc-padding`, or a file that was
     cut short."""
-    values = np.array(dat_text.split(), dtype=np.float64)
     expected = expected_lines(adc_counts, coils, padding)
-    if len(values) % 2 != 0:
-        raise ValueError("the .seq.dat has an odd number of values, every line must be '<re> <im>'")
-    if len(values) // 2 != expected:
+    if len(samples) != expected:
         raise ValueError(
             "the .seq.dat has {} lines, but {} coils x (ADC samples + {} padding) "
             "for this sequence make {} - check --coils and --adc-padding".format(
-                len(values) // 2, coils, padding, expected
+                len(samples), coils, padding, expected
             )
         )
 
-    signal = values[0::2] + 1j * values[1::2]
     parts, offset = [], 0
     for n in adc_counts:
         # One ADC is `coils` readouts of `n + padding` samples in a row; its
         # transpose without the padding is `n` rows of the output.
-        block = signal[offset : offset + coils * (n + padding)].reshape(coils, n + padding)
+        block = samples[offset : offset + coils * (n + padding)].reshape(coils, n + padding)
         parts.append(block[:, :n].T)
         offset += coils * (n + padding)
     if not parts:
         return np.zeros((0, coils), dtype="<c8")
-    return np.concatenate(parts).astype("<c8")
+    return np.concatenate(parts).astype("<c8", copy=False)
 
 
 def npy_bytes(signal: np.ndarray) -> bytes:
@@ -154,6 +182,28 @@ def npy_bytes(signal: np.ndarray) -> bytes:
     out = io.BytesIO()
     np.save(out, signal, allow_pickle=False)
     return out.getvalue()
+
+
+def npy_shape(path: str) -> Optional[Tuple[int, int]]:
+    """The shape of a signal saved by `upload`, from the `.npy` header alone -
+    None if the file is not a complete 2-D complex64 `.npy` (then it is
+    converted again)."""
+    try:
+        with open(path, "rb") as f:
+            version = np.lib.format.read_magic(f)
+            if version == (1, 0):
+                shape, _, dtype = np.lib.format.read_array_header_1_0(f)
+            else:
+                shape, _, dtype = np.lib.format.read_array_header_2_0(f)
+            header_end = f.tell()
+    except (OSError, ValueError):
+        return None
+    # Fortran order is fine: `convert` usually returns that, the shape is the same
+    if len(shape) != 2 or dtype != np.dtype("<c8"):
+        return None
+    if os.path.getsize(path) != header_end + shape[0] * shape[1] * dtype.itemsize:
+        return None
+    return int(shape[0]), int(shape[1])
 
 
 def fake_dat(adc_counts: List[int], coils: int, padding: int, rng: "random.Random" = None) -> str:
@@ -257,6 +307,80 @@ class JobEnded(Exception):
     for an offline scanner, or its session ended), so it is dropped here."""
 
 
+def timed_connection(base, timings: dict):
+    """`base` (an `http.client` connection class) that writes into `timings`
+    when it finished connecting (TCP, proxy tunnel and TLS: "connected") and
+    when it last sent something ("sent"), so a transfer can be told apart from
+    setting up the connection."""
+
+    class Timed(base):
+        def connect(self):
+            super().connect()
+            timings["connected"] = time.monotonic()
+
+        def send(self, data):
+            super().send(data)
+            timings["sent"] = time.monotonic()
+
+    return Timed
+
+
+def timed_opener(timings: dict):
+    """A urllib opener like `urlopen`'s - same proxies - that times its
+    connections into `timings`."""
+
+    class Http(urllib.request.HTTPHandler):
+        def http_open(self, req):
+            return self.do_open(timed_connection(http.client.HTTPConnection, timings), req)
+
+    class Https(urllib.request.HTTPSHandler):
+        def https_open(self, req):
+            # No context, like `urlopen`'s handler: the default one checks the certificate
+            return self.do_open(timed_connection(http.client.HTTPSConnection, timings), req)
+
+    return urllib.request.build_opener(Http, Https)
+
+
+def transfer_report(n_bytes: int, timings: dict, upload: bool) -> str:
+    """Where the time of a request went: setting up the connection, the
+    transfer itself and waiting for the server. The rate counts the transfer
+    alone, so it is the line's, not the server's or the handshake's.
+
+    For an upload the transfer runs from connected to the body sent, then the
+    server checks it before it answers. For a download the server answers
+    first, then the body is read."""
+    start, connected = timings["start"], timings.get("connected", timings["start"])
+    sent, response, done = timings.get("sent", connected), timings["response"], timings["done"]
+    if upload:
+        transfer, server = sent - connected, response - sent
+    else:
+        transfer, server = done - response, response - sent
+    return "{} in {}: connecting {}, transfer {} ({:.1f} MB/s), server {}".format(
+        size(n_bytes),
+        duration(done - start),
+        duration(connected - start),
+        duration(transfer),
+        n_bytes / 1e6 / max(transfer, 1e-3),
+        duration(server),
+    )
+
+
+def proxies() -> str:
+    """The proxies urllib uses (environment, or the system settings on Windows
+    and macOS), without passwords."""
+    found = urllib.request.getproxies()
+    if not found:
+        return "none (direct connection)"
+
+    def hide_password(url: str) -> str:
+        parts = urllib.parse.urlsplit(url)
+        if "@" not in parts.netloc:
+            return url
+        return urllib.parse.urlunsplit(parts._replace(netloc="***@" + parts.netloc.rsplit("@", 1)[1]))
+
+    return ", ".join("{}={}".format(scheme, hide_password(url)) for scheme, url in sorted(found.items()))
+
+
 class Api:
     """`/scanner/api/*`, authenticated by the runner secret. Network failures and
     server errors are retried with backoff for as long as it takes (the site's
@@ -267,8 +391,19 @@ class Api:
         self.secret = secret
         self.say = say
 
-    def request(self, method: str, path: str, data: Optional[bytes] = None, headers: Optional[dict] = None, auth: bool = True, timeout: float = 60):
-        """`(status, body)` of the response."""
+    def request(
+        self,
+        method: str,
+        path: str,
+        data: Optional[bytes] = None,
+        headers: Optional[dict] = None,
+        auth: bool = True,
+        timeout: float = 60,
+        timings: Optional[dict] = None,
+    ):
+        """`(status, body)` of the response. A `timings` dict gets the
+        `time.monotonic()` of the successful attempt's steps (see
+        `transfer_report`)."""
         url = path if path.startswith("http") else self.base_url + path
         headers = dict(headers or {})
         if auth:
@@ -277,8 +412,16 @@ class Api:
         while True:
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
-                with urllib.request.urlopen(req, timeout=timeout) as res:
-                    return res.status, res.read()
+                if timings is None:
+                    with urllib.request.urlopen(req, timeout=timeout) as res:
+                        return res.status, res.read()
+                timings.clear()
+                timings["start"] = time.monotonic()
+                with timed_opener(timings).open(req, timeout=timeout) as res:
+                    timings["response"] = time.monotonic()
+                    body = res.read()
+                    timings["done"] = time.monotonic()
+                    return res.status, body
             except urllib.error.HTTPError as e:
                 body = e.read().decode("utf-8", "replace")
                 if e.code in (401, 410):
@@ -308,15 +451,22 @@ class Api:
             {"Content-Type": "application/json"},
         )
 
-    def upload(self, job_id: str, name: str, data: bytes, headers: Optional[dict] = None) -> None:
+    def upload(self, job_id: str, name: str, data: bytes, headers: Optional[dict] = None) -> str:
+        """Upload `data`; returns where the time went (`transfer_report`)."""
         headers = dict(headers or {})
         headers["X-Content-SHA256"] = hashlib.sha256(data).hexdigest()
         headers["Content-Type"] = "application/octet-stream"
-        self.request("PUT", "/scanner/api/jobs/{}/files/{}".format(job_id, name), data, headers, timeout=600)
+        timings = {}
+        path = "/scanner/api/jobs/{}/files/{}".format(job_id, name)
+        self.request("PUT", path, data, headers, timeout=600, timings=timings)
+        return transfer_report(len(data), timings, upload=True)
 
-    def download(self, url: str) -> bytes:
+    def download(self, url: str) -> Tuple[bytes, str]:
+        """The file at `url` and where the time went (`transfer_report`)."""
         # The files route needs no credentials, the hash is the permission
-        return self.request("GET", url, auth=False)[1]
+        timings = {}
+        body = self.request("GET", url, auth=False, timings=timings)[1]
+        return body, transfer_report(len(body), timings, upload=False)
 
 
 # =============================================================================
@@ -346,13 +496,40 @@ def _enable_windows_colors() -> bool:
 
 def colors_supported(stream=None) -> bool:
     """Colors only on a terminal that shows them - not when the output goes to
-    a file, nor with `NO_COLOR` set (https://no-color.org)."""
+    a file, nor with `NO_COLOR` set (https://no-color.org). `FORCE_COLOR` turns
+    them on regardless."""
     stream = stream or sys.stdout
-    if os.environ.get("NO_COLOR") or not getattr(stream, "isatty", lambda: False)():
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    if type(stream).__module__.startswith("ipykernel"):
+        # Spyder's IPython console and Jupyter show colors, but their stdout
+        # is no terminal and says so via `isatty()`
+        return True
+    if not getattr(stream, "isatty", lambda: False)():
         return False
     if os.name == "nt":
         return _enable_windows_colors()
     return os.environ.get("TERM") != "dumb"
+
+
+def size(n_bytes: int) -> str:
+    for unit, scale in (("GB", 1e9), ("MB", 1e6), ("kB", 1e3)):
+        if n_bytes >= scale:
+            return "{:.1f} {}".format(n_bytes / scale, unit)
+    return "{} B".format(n_bytes)
+
+
+def took(since: float) -> str:
+    """How long ago the `time.monotonic()` value `since` was."""
+    return duration(time.monotonic() - since)
+
+
+def duration(seconds: float) -> str:
+    if seconds < 60:
+        return "{:.1f} s".format(seconds)
+    return "{:d} min {:02d} s".format(int(seconds // 60), int(seconds % 60))
 
 
 class Console:
@@ -475,6 +652,8 @@ class Job:
         self.name = "mrx_{}.seq".format(self.id)
         self.seq_path = os.path.join(measurement_dir, entry["date"], self.name)
         self.dat_path = self.seq_path + ".dat"
+        # The converted signal, kept so it survives a failed upload or a restart
+        self.npy_path = self.seq_path + ".signal.npy"
 
 
 class Runner:
@@ -547,7 +726,9 @@ class Runner:
             os.makedirs(os.path.dirname(new.seq_path), exist_ok=True)
             # Written before its line goes into the control file, so the
             # interpreter never finds a path that is not complete yet
-            write_atomic(new.seq_path, self.api.download(job["sequence_url"]))
+            seq, report = self.api.download(job["sequence_url"])
+            write_atomic(new.seq_path, seq)
+            self.say("downloaded {}: {}".format(name, report), DIM)
             if self.args.control_file is not None:
                 line = scanner_path(self.args.scanner_measurement_dir, entry["date"], name)
                 if append_to_control_file(self.args.control_file, line):
@@ -561,7 +742,7 @@ class Runner:
     def finish(self, job: Job) -> None:
         """Wait for the job's data and upload it."""
         if job.job["state"] == "uploading":
-            if not os.path.exists(job.dat_path):
+            if not os.path.exists(job.dat_path) and npy_shape(job.npy_path) is None:
                 self.report(job.job, "failed", "the script restarted and {} is gone".format(job.dat_path))
                 return
         else:
@@ -578,6 +759,16 @@ class Runner:
                 self.say("job {} failed: {}".format(job.id, e), RED)
                 self.report(job.job, "failed", str(e))
                 return
+            # Counted from when the job's turn came, so it includes the
+            # interpreter starting up and the file settling
+            self.say(
+                "{} complete ({}) after {} of measuring".format(
+                    os.path.basename(job.dat_path),
+                    size(os.path.getsize(job.dat_path)),
+                    duration(time.time() - job.entry["measuring_since"]),
+                ),
+                DIM,
+            )
 
         self.in_background(self.upload, job)
 
@@ -628,30 +819,77 @@ class Runner:
             raise errors[0]
 
     def upload(self, job: Job) -> None:
-        """Convert the `.seq.dat` and upload the signal. The `.seq.dat` itself is
-        not uploaded - it is several times larger - and stays where it is."""
-        self.say("{} complete, converting".format(os.path.basename(job.dat_path)))
+        """Convert the `.seq.dat`, save the signal next to it and upload it.
+        The `.seq.dat` itself is not uploaded - it is several times larger - and
+        stays where it is, as does the saved signal: if the upload fails, it can
+        be copied off the PC some other way. A script restarted in the middle of
+        an upload takes the saved signal rather than converting again."""
+        npy_name = os.path.basename(job.npy_path)
+        shape = npy_shape(job.npy_path) if job.job["state"] == "uploading" else None
+        if shape is not None:
+            with open(job.npy_path, "rb") as f:
+                data = f.read()
+            self.say("reusing {} ({}) from before the restart".format(npy_name, size(len(data))), DIM)
+        else:
+            converted = self.convert_dat(job)
+            if converted is None:
+                return
+            shape, data = converted
+            try:
+                write_atomic(job.npy_path, data)
+                self.say("saved signal.npy as {}".format(job.npy_path), DIM)
+            except OSError as e:
+                # Not worth losing the upload over
+                self.say("could not save signal.npy as {}: {}".format(job.npy_path, e), YELLOW)
+
+        if job.job["state"] != "uploading":
+            self.report(job.job, "uploading")
+        self.say("uploading signal.npy ({})".format(size(len(data))), DIM)
+        try:
+            report = self.api.upload(job.id, "signal.npy", data, {"X-Signal-Shape": "{},{}".format(*shape)})
+        except (JobEnded, SessionEnded):
+            if os.path.exists(job.npy_path):
+                self.say("signal.npy was not uploaded, it is kept at {}".format(job.npy_path), YELLOW)
+            raise
+        self.say("uploaded signal.npy: {}".format(report), DIM)
+        # The gateway has the signal now, so the job is done there. This line
+        # reaches the gateway's log with the next report.
+        self.say("job {} done: signal {} x {} coils uploaded".format(job.id, *shape), GREEN)
+
+    def convert_dat(self, job: Job) -> Optional[Tuple[Tuple[int, int], bytes]]:
+        """The job's `.seq.dat` as `(shape, .npy contents)` of the signal, or
+        None if it could not be converted (the job is failed then)."""
+        dat_name = os.path.basename(job.dat_path)
         try:
             with open(job.seq_path, "r", encoding="utf-8") as f:
                 counts = adc_sample_counts(f.read())
+            self.say("parsing {} ({})".format(dat_name, size(os.path.getsize(job.dat_path))), DIM)
+            t = time.monotonic()
             with open(job.dat_path, "r", encoding="ascii") as f:
-                signal = convert(f.read(), counts, self.args.coils, self.args.adc_padding)
+                samples = read_dat(f)
+            self.say("parsed {} lines in {}, converting".format(len(samples), took(t)), DIM)
+            t = time.monotonic()
+            signal = convert(samples, counts, self.args.coils, self.args.adc_padding)
+            del samples
             if CONJUGATE:
-                signal = np.conj(signal)
+                np.conjugate(signal, out=signal)
+            self.say(
+                "converted to {} x {} coils ({} ADCs{}) in {}".format(
+                    signal.shape[0], signal.shape[1], len(counts), ", conjugated" if CONJUGATE else "", took(t)
+                ),
+                DIM,
+            )
         except (ValueError, UnicodeDecodeError) as e:
             # Whoever looks into it needs the raw file, which only the site has
             message = "{} - the raw data stays at the site, in {}".format(e, job.dat_path)
             self.say("job {} failed: {}".format(job.id, message), RED)
             self.report(job.job, "failed", message)
-            return
+            return None
 
-        if job.job["state"] != "uploading":
-            self.report(job.job, "uploading")
         shape = signal.shape
-        self.api.upload(job.id, "signal.npy", npy_bytes(signal), {"X-Signal-Shape": "{},{}".format(*shape)})
-        # The gateway has the signal now, so the job is done there. This line
-        # reaches the gateway's log with the next report.
-        self.say("job {} done: signal {} x {} coils uploaded".format(job.id, *shape), GREEN)
+        data = npy_bytes(signal)
+        del signal
+        return shape, data
 
     def simulate(self, job: Job) -> None:
         """Play the interpreter: wait a bit, check that the job is in the
@@ -788,10 +1026,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("\nNext time, the same settings are:\n  {}\n".format(paint(command_line(args), DIM)))
     print("MRX scanner session of {} at {}".format(paint(OPERATOR, BOLD), BASE_URL))
     print("Scan token (give it to who may measure here): {}".format(paint(SCAN_TOKEN, BOLD, CYAN)))
+    print("Proxies: {}".format(proxies()))
     if CONJUGATE:
         print("Signal is complex conjugated before upload\n")
     else:
         print(paint("Signal is NOT complex conjugated before upload", YELLOW) + "\n")
+    if numpy_too_old_for_fast_loadtxt():
+        # `np.loadtxt` only has a fast parser (in C) since 1.23; before that it
+        # is pure Python, slow and several times as hungry for memory
+        bar = "!" * 72
+        lines = [
+            bar,
+            "WARNING: numpy {} is old (older than 1.23)".format(np.__version__),
+            "Reading back large signals (.seq.dat) may be very slow and use a lot",
+            "of memory. Update numpy to 1.23 or newer if you can.",
+            bar,
+        ]
+        print("\n".join(paint(line, BOLD, RED) for line in lines) + "\n")
     if args.simulate:
         print(paint("SIMULATING: no scanner is used, the data is noise", BOLD, YELLOW) + "\n")
 
