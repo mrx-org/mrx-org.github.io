@@ -7,7 +7,7 @@
 <link rel="icon" href="../assets/favicon.png">
 <!--
   The page a scanner operator creates a session on. It logs in to the MRX
-  gateway (the same OAuth flow as the gateway's /keys page, pointed at the
+  gateway (the same AuthKit login as the gateway's /keys page, pointed at the
   gateway instead of this origin), asks POST /scanner/sessions for a session,
   fills the values it gets back into mrx_scanner.py next to this page and hands
   that out as a download. Nothing is kept: closing the page loses the token, and
@@ -81,8 +81,26 @@ function checkGateway(url) {
   return u.origin;
 }
 
-async function login() {
-  const reg = await fetch(gateway + "/register", {
+async function getJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("GET " + url + ": " + res.status);
+  return res.json();
+}
+
+// The resource a token must be for (the gateway's /mcp) and the endpoints of
+// the authorization server (AuthKit) that issues it
+async function discover() {
+  const resource = await getJson(gateway + "/.well-known/oauth-protected-resource/mcp");
+  const server = await getJson(resource.authorization_servers[0].replace(/\/$/, "") + "/.well-known/oauth-authorization-server");
+  return {resource: resource.resource, authorize: server.authorization_endpoint,
+          token: server.token_endpoint, register: server.registration_endpoint};
+}
+
+// Registered once per authorization server and page, then reused
+async function clientId(at) {
+  const key = "mrx-client:" + at.register + ":" + redirectUri;
+  try { const known = localStorage.getItem(key); if (known) return known; } catch {}
+  const reg = await fetch(at.register, {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
@@ -94,18 +112,24 @@ async function login() {
     }),
   });
   if (!reg.ok) throw new Error("registration failed: " + await reg.text());
-  const clientId = (await reg.json()).client_id;
+  const id = (await reg.json()).client_id;
+  try { localStorage.setItem(key, id); } catch {}
+  return id;
+}
 
+async function login() {
+  const at = await discover();
+  const id = await clientId(at);
   const verifier = random(), state = random();
-  sessionStorage.setItem("mrx-login", JSON.stringify({gateway, clientId, verifier, state}));
+  sessionStorage.setItem("mrx-login", JSON.stringify({gateway, clientId: id, verifier, state, at}));
   const challenge = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
-  location = gateway + "/authorize?" + new URLSearchParams({
-    response_type: "code", client_id: clientId, redirect_uri: redirectUri,
+  location = at.authorize + "?" + new URLSearchParams({
+    response_type: "code", client_id: id, redirect_uri: redirectUri, resource: at.resource,
     code_challenge: challenge, code_challenge_method: "S256", state,
   });
 }
 
-// Back from the gateway with a `code`: the login state says which gateway
+// Back from AuthKit with a `code`: the login state says which gateway
 async function finishLogin(params) {
   history.replaceState(null, "", location.pathname);
   const saved = JSON.parse(sessionStorage.getItem("mrx-login") || "null");
@@ -113,14 +137,18 @@ async function finishLogin(params) {
   if (!saved || saved.state !== params.get("state")) throw new Error("login state mismatch, try again");
   gateway = checkGateway(saved.gateway);
 
-  const res = await fetch(gateway + "/token", {
+  const res = await fetch(saved.at.token, {
     method: "POST",
     body: new URLSearchParams({
-      grant_type: "authorization_code", code: params.get("code"),
-      redirect_uri: redirectUri, client_id: saved.clientId, code_verifier: saved.verifier,
+      grant_type: "authorization_code", code: params.get("code"), redirect_uri: redirectUri,
+      client_id: saved.clientId, code_verifier: saved.verifier, resource: saved.at.resource,
     }),
   });
-  if (!res.ok) throw new Error("login failed: " + await res.text());
+  if (!res.ok) {
+    // A registration AuthKit no longer knows: register again next time
+    try { localStorage.removeItem("mrx-client:" + saved.at.register + ":" + redirectUri); } catch {}
+    throw new Error("login failed: " + await res.text());
+  }
   token = (await res.json()).access_token;
 }
 
@@ -148,7 +176,7 @@ async function renderScript(values) {
 }
 
 function offerLogin() {
-  app.innerHTML = `<button id="login">Log in with GitHub</button>`;
+  app.innerHTML = `<button id="login">Log in</button>`;
   document.getElementById("login").onclick = run(login);
 }
 
