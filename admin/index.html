@@ -1,8 +1,8 @@
 <!doctype html>
 <!--
   The MRX gateway's admin dashboard. A static page: it logs in to the gateway
-  (the same flow as `src/mcp_gateway/pages.py`, pointed at the gateway rather
-  than at its own origin) and calls the gateway's `/admin/api/*` routes with
+  (through AuthKit, the same flow as `src/mcp_gateway/web/pages.py`, pointed at
+  the gateway rather than at its own origin) and calls the gateway's `/admin/api/*` routes with
   the token it got - see `src/mcp_gateway/admin.py`.
 
   Meant for mrx-org.github.io next to the scanner session page. It talks to
@@ -70,7 +70,7 @@
   <span class="gateway" id="gateway"></span>
   <span class="me" id="me"></span>
 </header>
-<main id="app"><div class="center"><button class="primary" id="login">Log in with GitHub</button></div></main>
+<main id="app"><div class="center"><button class="primary" id="login">Log in</button></div></main>
 
 <script>
 const PRODUCTION = "https://mrx-org--mcp-gateway-func.modal.run";
@@ -110,28 +110,64 @@ const b64url = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes)))
 const random = () => b64url(crypto.getRandomValues(new Uint8Array(32)));
 const text = s => { const e = document.createElement("span"); e.textContent = s ?? ""; return e.innerHTML; };
 
-async function login(clientName) {
-  const reg = await fetch(gateway + "/register", {
+async function getJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("GET " + url + ": " + res.status);
+  return res.json();
+}
+
+// The resource a token must be for (the gateway's /mcp) and the endpoints of
+// the authorization server (AuthKit) that issues it
+async function discover() {
+  const resource = await getJson(gateway + "/.well-known/oauth-protected-resource/mcp");
+  const server = await getJson(resource.authorization_servers[0].replace(/\/$/, "") + "/.well-known/oauth-authorization-server");
+  return {resource: resource.resource, authorize: server.authorization_endpoint,
+          token: server.token_endpoint, register: server.registration_endpoint};
+}
+
+// Registered once per authorization server and page, then reused
+async function clientId(at, clientName) {
+  const key = "mrx-client:" + at.register + ":" + redirectUri;
+  try { const known = localStorage.getItem(key); if (known) return known; } catch {}
+  const reg = await fetch(at.register, {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
       client_name: clientName,
       redirect_uris: [redirectUri],
-      grant_types: ["authorization_code"],
+      grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
       token_endpoint_auth_method: "none",
     }),
   });
   if (!reg.ok) throw new Error("registration failed: " + await reg.text());
-  const clientId = (await reg.json()).client_id;
+  const id = (await reg.json()).client_id;
+  try { localStorage.setItem(key, id); } catch {}
+  return id;
+}
 
+async function login(clientName) {
+  const at = await discover();
+  const id = await clientId(at, clientName);
   const verifier = random(), state = random();
-  sessionStorage.setItem("mrx-login", JSON.stringify({clientId, verifier, state}));
+  sessionStorage.setItem("mrx-login", JSON.stringify({clientId: id, verifier, state, at}));
   const challenge = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
-  location = gateway + "/authorize?" + new URLSearchParams({
-    response_type: "code", client_id: clientId, redirect_uri: redirectUri,
+  location = at.authorize + "?" + new URLSearchParams({
+    response_type: "code", client_id: id, redirect_uri: redirectUri, resource: at.resource,
+    scope: "openid offline_access",
     code_challenge: challenge, code_challenge_method: "S256", state,
   });
+}
+
+// What a token request returns, kept with what refreshing it takes
+let session = null;
+
+async function tokenRequest(at, params) {
+  const res = await fetch(at.token, {method: "POST", body: new URLSearchParams({...params, resource: at.resource})});
+  if (!res.ok) throw new Error("login failed: " + await res.text());
+  const got = await res.json();
+  token = got.access_token;
+  return got;
 }
 
 async function finishLogin(params) {
@@ -139,39 +175,61 @@ async function finishLogin(params) {
   const saved = JSON.parse(sessionStorage.getItem("mrx-login") || "null");
   sessionStorage.removeItem("mrx-login");
   if (!saved || saved.state !== params.get("state")) throw new Error("login state mismatch, try again");
+  try {
+    const got = await tokenRequest(saved.at, {
+      grant_type: "authorization_code", code: params.get("code"), redirect_uri: redirectUri,
+      client_id: saved.clientId, code_verifier: saved.verifier,
+    });
+    session = {at: saved.at, clientId: saved.clientId, refresh: got.refresh_token || null};
+  } catch (e) {
+    // A registration AuthKit no longer knows: register again next time
+    try { localStorage.removeItem("mrx-client:" + saved.at.register + ":" + redirectUri); } catch {}
+    throw e;
+  }
+}
 
-  const res = await fetch(gateway + "/token", {
-    method: "POST",
-    body: new URLSearchParams({
-      grant_type: "authorization_code", code: params.get("code"),
-      redirect_uri: redirectUri, client_id: saved.clientId, code_verifier: saved.verifier,
-    }),
-  });
-  if (!res.ok) throw new Error("login failed: " + await res.text());
-  token = (await res.json()).access_token;
+// Access tokens live 5 minutes; the refresh token (rotated on every use) keeps
+// the dashboard logged in. False if there is none or AuthKit refuses it.
+async function refresh() {
+  if (!session || !session.refresh) return false;
+  try {
+    const got = await tokenRequest(session.at, {
+      grant_type: "refresh_token", refresh_token: session.refresh, client_id: session.clientId,
+    });
+    session.refresh = got.refresh_token || session.refresh;
+    storage.set();
+    return true;
+  } catch { return false; }
 }
 
 // --- Talking to the gateway
-async function api(path, query = {}, method = "GET", body = undefined) {
+async function api(path, query = {}, method = "GET", body = undefined, retried = false) {
   const url = new URL(gateway + path);
   for (const [k, v] of Object.entries(query)) if (v !== "" && v != null) url.searchParams.set(k, v);
   const headers = token ? {Authorization: "Bearer " + token} : {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const res = await fetch(url, {method, headers, body: body === undefined ? undefined : JSON.stringify(body)});
-  if (!res.ok) {
-    if (res.status === 401 && token) logout();
-    throw new Error(path + ": " + res.status + " " + await res.text());
+  if (res.status === 401 && token && !retried) {
+    if (await refresh()) return api(path, query, method, body, true);
+    logout();
   }
+  if (!res.ok) throw new Error(path + ": " + res.status + " " + await res.text());
   return res.json();
 }
 
-// The token is kept across reloads, per gateway. GitHub OAuth Apps hand out no
-// refresh token, so the gateway's token is good for a year - until "Log out"
-// or until the gateway stops accepting it (a 401), whichever comes first.
-const TOKEN_KEY = "mrx-admin-token:" + gateway;
+// The login is kept across reloads, per gateway: the access token and the
+// refresh token that renews it - until "Log out" or until AuthKit refuses to
+// renew it, whichever comes first.
+const TOKEN_KEY = "mrx-admin-session.v2:" + gateway;
 const storage = {
-  get: () => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } },
-  set: t => { try { localStorage.setItem(TOKEN_KEY, t); } catch {} },
+  get: () => {
+    try {
+      const kept = JSON.parse(localStorage.getItem(TOKEN_KEY) || "null");
+      if (kept) { session = kept.session; return kept.token; }
+    } catch {}
+    return null;
+  },
+  set: () => { try { localStorage.setItem(TOKEN_KEY, JSON.stringify({token, session})); } catch {} },
   clear: () => { try { localStorage.removeItem(TOKEN_KEY); } catch {} },
 };
 
@@ -197,7 +255,7 @@ const duration = ms => ms == null ? "" : ms < 1000 ? ms + " ms" : (ms / 1000).to
 const bytes = n => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(0) + " KB" : (n / 1048576).toFixed(1) + " MB";
 const who = r => r.login || r.user || "";
 const whoLink = r => who(r) ? `<a class="who" data-user="${text(who(r))}">${text(who(r))}</a>` : "";
-const avatar = login => login ? `<img class="avatar" alt="" loading="lazy" src="https://github.com/${encodeURIComponent(login)}.png?size=44">` : "";
+const avatar = url => url ? `<img class="avatar" alt="" loading="lazy" src="${text(url)}">` : "";
 const level = r => "raw" in r ? "RAW" : (r.level || "");
 const short = host => (host || "").replace(/^modal:/, "").slice(-6);
 
@@ -285,7 +343,7 @@ async function renderUsers(el) {
     <div class="table-wrap"><table><thead><tr>${cols.map(([k, l]) =>
       `<th class="sortable" data-key="${k}">${l}${userSort.key === k ? (userSort.dir > 0 ? " ▲" : " ▼") : ""}</th>`).join("")}<th>Tools</th></tr></thead>
     <tbody>${sorted.map(u => `<tr>
-      <td class="nowrap">${avatar(u.login)} <a class="who" data-user="${text(u.login || u.user)}">${text(u.login || u.user)}</a>
+      <td class="nowrap"><a class="who" data-user="${text(u.login || u.user)}">${text(u.login || u.user)}</a>
         ${u.login ? `<span class="muted">${text(u.user)}</span>` : ""}</td>
       <td class="num">${u.calls}</td>
       <td class="num ${u.errors ? "error" : ""}">${u.errors}</td>
@@ -475,13 +533,13 @@ async function renderAdmins(el, list) {
     list = await api("/admin/api/admins");
   }
   el.innerHTML = `<form class="bar" id="add">
-      <input id="login" placeholder="GitHub login" required>
+      <input id="login" type="email" placeholder="email" required>
       <button class="primary">Add admin</button>
-      <span class="muted">Stored by GitHub user id, so a renamed account stays admin.
+      <span class="muted">They must have logged in once. Stored by user id.
         Other servers pick up a change within 30 s.</span></form>
-    <div class="table-wrap"><table><thead><tr><th>User</th><th>GitHub id</th><th></th></tr></thead>
+    <div class="table-wrap"><table><thead><tr><th>User</th><th>User id</th><th></th></tr></thead>
     <tbody>${list.map(a => `<tr>
-      <td class="nowrap">${avatar(a.login)} ${text(a.login || "")}</td>
+      <td class="nowrap">${text(a.login || "")}</td>
       <td class="muted">${text(a.id)}</td>
       <td>${list.length > 1 ? `<button data-remove="${text(a.id)}" data-login="${text(a.login || a.id)}">Remove</button>` : ""}</td>
     </tr>`).join("") || `<tr><td colspan="3" class="muted">Nobody - <code>admins.txt</code> is empty or missing.</td></tr>`}</tbody></table></div>`;
@@ -503,7 +561,7 @@ async function renderAdmins(el, list) {
 async function start() {
   me = await api("/admin/api/me");
   document.getElementById("me").innerHTML = me.login
-    ? `${avatar(me.login)} <span>${text(me.login)}</span> <button id="logout">Log out</button>`
+    ? `${avatar(me.avatar_url)} <span>${text(me.login)}</span> <button id="logout">Log out</button>`
     : `<span class="muted">local, no login</span>`;
   document.getElementById("logout")?.addEventListener("click", logout);
   if (!me.admin) {
@@ -518,7 +576,7 @@ document.getElementById("login").onclick = run(() => login("MRX admin dashboard"
 if (params.has("error")) {
   showError(params.get("error_description") || params.get("error"));
 } else if (params.has("code")) {
-  run(async () => { await finishLogin(params); storage.set(token); await start(); })();
+  run(async () => { await finishLogin(params); storage.set(); await start(); })();
 } else if ((token = storage.get())) {
   run(start)();
 } else {
