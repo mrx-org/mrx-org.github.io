@@ -3,7 +3,7 @@ queued for it from the gateway, has the Pulseq interpreter measure them and
 uploads what it measured. See `docs/scan/design.md` in the mcp-gateway repo for
 why it works this way.
 
-This file lives only here, next to the session page on mrx-org.github.io
+This file lives only here, next to the session page on anyfield.net
 (`docs/scanner/`), which hands it out with a session's secrets filled in. The
 gateway keeps its own copy of `adc_sample_counts` (`scan/seq.py`) - change both
 together. It runs on whatever Python
@@ -1017,7 +1017,7 @@ def command_line(args) -> str:
 
 def main(argv: Optional[List[str]] = None) -> int:
     if not RUNNER_SECRET.startswith("scr_"):
-        print("This is the template. Download your own script at https://mrx-org.github.io/scanner/.")
+        print("This is the template. Download your own script at https://anyfield.net/scanner/.")
         return 2
 
     args = settings(argv)

@@ -5,7 +5,7 @@
   the gateway rather than at its own origin) and calls the gateway's `/admin/api/*` routes with
   the token it got - see `src/mcp_gateway/admin.py`.
 
-  Meant for mrx-org.github.io next to the scanner session page. It talks to
+  Meant for anyfield.net next to the scanner session page. It talks to
   the production gateway, to the gateway that serves it (`/admin`, until it
   moves), or to a loopback one named in `?gateway=` - and to nothing else.
 -->
@@ -73,7 +73,7 @@
 <main id="app"><div class="center"><button class="primary" id="login">Log in</button></div></main>
 
 <script>
-const PRODUCTION = "https://mrx-org--mcp-gateway-func.modal.run";
+const PRODUCTION = "https://mcp.anyfield.net";
 const params = new URLSearchParams(location.search);
 const isLoopback = host => ["127.0.0.1", "localhost", "[::1]", "::1"].includes(host);
 
