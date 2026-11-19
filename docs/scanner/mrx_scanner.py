@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import random
@@ -72,10 +73,11 @@ DEFAULT_COILS = 20
 DEFAULT_ADC_PADDING = 4
 
 # How often the script talks to the gateway: often while a job is on its way,
-# rarely when idle (the Cloudflare Workers free plan allows 100,000 requests a
-# day for everything).
+# less when idle - a new job waits at most this long while the scanner is free.
+# The Cloudflare Workers free plan allows 100,000 requests a day for everything;
+# 5 s is about 17,000 a day.
 SYNC_ACTIVE = 2.0  # seconds
-SYNC_IDLE = 15.0  # seconds
+SYNC_IDLE = 5.0  # seconds
 # `sync.bat` writes its heartbeat every ~3 s. One that has not changed for this
 # long means it is not running.
 SYNC_BAT_TIMEOUT = 15.0  # seconds
@@ -422,6 +424,86 @@ class Gateway(Protocol):
         """A new job for `job`, which the gateway records as its retry."""
 
 
+class SessionEnded(Exception):
+    """The gateway no longer knows this script's session (expired or unknown)."""
+
+
+class HttpGateway:
+    """The gateway's `/scanner/api/*`. The signal goes up as a multipart
+    upload: the gateway hands out one URL per part (R2, presigned), and the
+    parts go there directly, `streams` at a time."""
+
+    def __init__(self, base_url: str, secret: str, part_size: int = 16 * 1024 * 1024, streams: int = 4) -> None:
+        import httpx
+
+        self.httpx = httpx
+        self.base_url = base_url.rstrip("/")
+        self.part_size = part_size
+        self.streams = streams
+        agent = {"User-Agent": "mrx-scanner/" + VERSION}
+        self.client = httpx.AsyncClient(
+            timeout=httpx.Timeout(60, connect=15), headers={"Authorization": "Bearer " + secret, **agent}
+        )
+        # Presigned URLs carry their own credentials: no Authorization header
+        self.parts = httpx.AsyncClient(timeout=httpx.Timeout(300, connect=15), headers=agent)
+
+    def _check(self, res) -> dict:
+        if res.status_code in (401, 410):
+            raise SessionEnded(res.text or "the session has ended")
+        if res.status_code >= 400:
+            raise ScanError("{} {}: {} {}".format(res.request.method, res.request.url.path, res.status_code, res.text[:300]))
+        return res.json() if res.content else {}
+
+    async def _post(self, path: str, payload: dict | None = None) -> dict:
+        return self._check(await self.client.post(self.base_url + path, json=payload or {}))
+
+    async def sync(self, report: dict) -> dict:
+        return await self._post("/scanner/api/sync", report)
+
+    async def download(self, job: "Job") -> bytes:
+        res = await self.client.get(job.sequence_url)
+        if res.status_code != 200:
+            raise ScanError("downloading the sequence failed: {} {}".format(res.status_code, res.text[:200]))
+        return res.content
+
+    async def upload(self, job: "Job", path: Path, progress: Callable[[int, int], None]) -> None:
+        data = await asyncio.to_thread(path.read_bytes)
+        sha256 = await asyncio.to_thread(lambda: hashlib.sha256(data).hexdigest())
+        start = await self._post(
+            "/scanner/api/jobs/{}/upload".format(job.id),
+            {"size": len(data), "part_size": self.part_size, "sha256": sha256, "shape": job.shape},
+        )
+        urls, part_size = start["urls"], start["part_size"]
+        sent = [0] * len(urls)
+        etags: list[str] = [""] * len(urls)
+        gate = asyncio.Semaphore(self.streams)
+
+        async def put(n: int) -> None:
+            chunk = data[n * part_size : (n + 1) * part_size]
+            async with gate:
+                for attempt in range(1, 4):
+                    try:
+                        res = await self.parts.put(urls[n], content=chunk)
+                        res.raise_for_status()
+                        etags[n] = res.headers["etag"]
+                        sent[n] = len(chunk)
+                        progress(sum(sent), len(data))
+                        return
+                    except (self.httpx.HTTPError, KeyError) as e:
+                        if attempt == 3:
+                            raise ScanError("part {} of {} failed 3 times: {}".format(n + 1, len(urls), e))
+                        await asyncio.sleep(2 * attempt)
+
+        await asyncio.gather(*(put(n) for n in range(len(urls))))
+        await self._post("/scanner/api/jobs/{}/upload/complete".format(job.id), {"upload": start["upload"], "etags": etags})
+
+    async def abort_upload(self, job: "Job") -> None:
+        await self._post("/scanner/api/jobs/{}/upload/abort".format(job.id))
+
+    async def retry(self, job: "Job", mode: str) -> dict:
+        return await self._post("/scanner/api/jobs/{}/retry".format(job.id), {"mode": mode})
+
+
 class DemoGateway:
     """A gateway in the process, for `--demo`: a few jobs at once, then one
     every `every` seconds, small random sequences, uploads at a few MB/s."""
@@ -592,6 +674,7 @@ class Engine:
         self._beat: int | None = None
         self._beat_seen = 0.0
         self._drops = 0
+        self.ended = ""  # why the gateway ended the session, if it did
         self.load()
 
     # --- the loop --------------------------------------------------------------
@@ -609,11 +692,19 @@ class Engine:
         return any(job.state not in FINAL or job.on_scanner for job in self.jobs.values())
 
     async def sync(self) -> None:
+        if self.ended:
+            return
         report = {
             "version": VERSION,
             "sync_bat": self.sync_bat_alive,
             "jobs": {
-                job.id: {"state": job.state, "by": job.by, "reason": job.reason, "progress": round(job.progress, 3)}
+                job.id: {
+                    "state": job.state,
+                    "message": job.message,
+                    "by": job.by,
+                    "reason": job.reason,
+                    "has_data": self.has_data(job),
+                }
                 for job in self.jobs.values()
                 if job.state not in FINAL or time.time() - (job.finished or job.created) < 3600
             },
@@ -621,6 +712,10 @@ class Engine:
         }
         try:
             answer = await self.gateway.sync(report)
+        except SessionEnded as e:
+            self.ended = str(e)
+            self.log("session.ended", "the session has ended: {} - get a new script".format(e), level="error")
+            return
         except Exception as e:  # noqa: BLE001 - the network, reported and retried
             if self.gateway_online is not False:
                 self.log("gateway.offline", "gateway not reachable: {}".format(e), level="warning")
@@ -633,14 +728,43 @@ class Engine:
         self.latest_version = answer.get("version") or VERSION
         for info in answer.get("jobs", []):
             if info["id"] not in self.jobs:
-                job = self.add(info)
-                self.log("job.new", "new job from {}".format(job.login), job=job)
-                self.spawn(job, self.download(job))
+                self.take(info)
         for request in answer.get("cancel", []):
             job = self.jobs.get(request["job"])
             if job is not None:
                 self.cancel(job, request.get("by", "agent"), request.get("reason", ""))
+        for final in answer.get("final", []):
+            # Ended on the gateway's side (expired, or failed by a timeout)
+            job = self.jobs.get(final["job"])
+            if job is not None and job.state not in FINAL:
+                task = self.tasks.pop(job.id, None)
+                if task is not None:
+                    task.cancel()
+                self.set(job, final["state"], final.get("message", ""), level="warning")
         self._next_sync = time.monotonic() + (SYNC_ACTIVE if self.busy() else SYNC_IDLE)
+
+    def take(self, info: dict) -> Job:
+        """A job the gateway handed out: download its sequence - or, for a
+        retry that only uploads again, upload the signal this script kept."""
+        job = self.add(info, retry_of=info.get("retry_of", ""))
+        source = self.jobs.get(info.get("upload_from") or "")
+        if info.get("upload_from"):
+            if source is None or not self.has_data(source):
+                self.set(job, "failed", "this script no longer has the signal of job {}".format(info["upload_from"]))
+                return job
+            job.npy, job.shape, job.file, job.day = source.npy, source.shape, source.file, source.day
+            if self.seq_path(source).exists():
+                shutil.copyfile(self.seq_path(source), self.seq_path(job))
+            self.log("job.new", "upload again of job {} for {}".format(source.id, job.login), job=job)
+            self.spawn(job, self.upload(job))
+            return job
+        self.log("job.new", "new job from {}".format(job.login), job=job)
+        self.spawn(job, self.download(job))
+        return job
+
+    def has_data(self, job: Job) -> bool:
+        """Whether this script has the job's whole signal, to upload again."""
+        return bool(job.npy) and not job.partial and Path(job.npy).exists()
 
     def add(self, info: dict, **extra) -> Job:
         job = Job(
@@ -777,7 +901,7 @@ class Engine:
             k, total = partial
             job.by = "supervisor"
             job.reason = job.reason or "aborted on the scanner after {} of {} ADCs".format(k, total)
-            self.set(job, "cancelled", "{} - the partial signal stays at {}".format(job.reason, job.npy))
+            self.set(job, "cancelled", "the partial signal stays at the site: " + job.npy)
             return
         await self.upload(job)
 
@@ -859,8 +983,7 @@ class Engine:
         """Whether `job` can be uploaded again, and measured again."""
         if job is None or job.state not in ("cancelled", "failed", "expired"):
             return False, False
-        has_data = bool(job.npy) and not job.partial and Path(job.npy).exists()
-        return has_data, self.seq_path(job).exists()
+        return self.has_data(job), self.seq_path(job).exists()
 
     async def retry(self, job: Job, mode: str = "auto", priority: bool = True) -> Job:
         """A new job for `job`: its signal uploaded again, or measured again."""
@@ -1062,6 +1185,8 @@ class ScannerApp(App):
         info.append(" · {} · {} coils, padding {} · lookahead {} · v{}".format(s["share"], e.coils, e.padding, e.lookahead, VERSION))
         if e.latest_version != VERSION:
             info.append("  new script version {}: download it again".format(e.latest_version), style="bold yellow")
+        if e.ended:
+            info.append("\nSESSION ENDED: {} - get a new script at anyfield.net/scanner".format(e.ended), style="bold red")
         info.append("\nscan token ")
         info.append(SCAN_TOKEN, style="bold cyan")
         info.append("  (t copies it)", style="dim")
@@ -1265,9 +1390,6 @@ def main(argv: list[str] | None = None) -> int:
     if not args.demo and not RUNNER_SECRET.startswith("scr_"):
         print("This is the template. Download your own script at https://anyfield.net/scanner/ - or try it with --demo.")
         return 2
-    if not args.demo:
-        print("This version needs the gateway's new sync API, which is not deployed yet. Try it with --demo.")
-        return 2
 
     workdir = Path(args.workdir) if args.workdir else SCRIPT_DIR / "mrx_scanner_data"
     if args.demo:
@@ -1282,7 +1404,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     log = EventLog(workdir if args.demo else SCRIPT_DIR)
-    gateway = DemoGateway()
+    gateway = DemoGateway() if args.demo else HttpGateway(BASE_URL, RUNNER_SECRET)
     engine = Engine(gateway, share, workdir, log, args.coils, args.adc_padding, args.lookahead, scanner)
     mode = "DEMO" if args.demo else "SIMULATION" if args.simulate else "LIVE"
     log("script.start", "started ({}), share {}".format(mode.lower(), share.root), version=VERSION)
