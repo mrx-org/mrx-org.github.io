@@ -7,7 +7,7 @@ tags:
 
 The **MRX ToolAPI** is a cross-language framework for connecting MRI simulation and analysis **tools** with **clients**. It provides a strongly-typed value system for MR domain data and an opaque communication layer, so that calling a remote tool feels like calling a local function.
 
-ToolAPI is the foundation of the MRX ecosystem: all [tools](../tools/index.md) are built on it, and apps like <a href="https://mrx-org.github.io/anyfield/" data-router-ignore>anyfield</a> use it to invoke tools.
+ToolAPI is the foundation of the MRX ecosystem: all [tools](../tools/index.md) are built on it, and apps like <a href="https://app.anyfield.net/" data-router-ignore>anyfield</a> use it to invoke tools.
 
 ## Core Concepts
 
@@ -33,7 +33,7 @@ sequenceDiagram
 
 A **client** is any environment that invokes tools. Examples include:
 
-- A web application like the [Any-field Scanner](https://mrx-org.github.io/anyfield/)
+- A web application like the [Any-field Scanner](https://app.anyfield.net/)
 - A Python script optimizing a sequence using simulation tools
 - A Jupyter notebook for interactive MR experimentation
 - An MCP shim exposing tool capabilities to LLMs

@@ -12,7 +12,7 @@ title: Welcome
 
 MRX builds an ecosystem of open-source MRI simulation and analysis tools, culminating in `MRX: Assistant` — an intelligent AI assistant supporting clinic personnel with MR measurements, backed by a real physics world model.
 
-[Try Anyfield Scanner ›](https://mrx-org.github.io/anyfield/){ .md-button .md-button--primary }
+[Try Anyfield Scanner ›](https://app.anyfield.net/){ .md-button .md-button--primary }
 [Explore the docs ›](toolapi/index.md){ .md-button }
 
 </div>
