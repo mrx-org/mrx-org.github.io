@@ -12,7 +12,7 @@ title: Welcome
 
 MRX builds an ecosystem of open-source MRI simulation and analysis tools, culminating in `MRX: Assistant` — an intelligent AI assistant supporting clinic personnel with MR measurements, backed by a real physics world model.
 
-[Try Anyfield Scanner ›](https://mrx-org.github.io/anyfield/){ .md-button .md-button--primary }
+[Try Anyfield Scanner ›](https://app.anyfield.net/){ .md-button .md-button--primary }
 [Explore the docs ›](toolapi/index.md){ .md-button }
 
 </div>
@@ -78,4 +78,7 @@ Configuring MCP? <a href="/admin/" data-router-ignore>Open the admin panel ›</
 
 </div>
 
-<p class="funding-note">Funded by <a href="https://www.interaktive-technologien.de/projekte/mrx">START-interaktiv</a> (BMFTR, February 2026 – January 2029).</p>
+<div class="funding-note">
+<img src="assets/bmftr_funding_en.svg" alt="With funding from the Federal Ministry of Research, Technology and Space" class="funding-logo">
+<p>Funded by the German Federal Ministry of Research, Technology and Space (BMFTR) within <a href="https://www.interaktive-technologien.de/projekte/mrx">START-interaktiv</a>, grant no. 16SV9585 (February 2026 – January 2029).</p>
+</div>

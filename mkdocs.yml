@@ -1,5 +1,5 @@
 site_name: MRX
-site_url: https://mrx-org.github.io/
+site_url: https://anyfield.net/
 repo_url: https://github.com/mrx-org
 
 extra_css:
@@ -86,5 +86,5 @@ nav:
       - Rapid MRI Simulation: tools/rapisim.md
       - Spin Simulation: tools/spinsim.md
       - Trajectory Extractor: tools/trajex.md
-  - Anyfield Scanner: https://mrx-org.github.io/anyfield/
+  - Anyfield Scanner: https://app.anyfield.net/
   - Tags: tags.md
