@@ -78,4 +78,7 @@ Configuring MCP? <a href="/admin/" data-router-ignore>Open the admin panel ›</
 
 </div>
 
-<p class="funding-note">Funded by <a href="https://www.interaktive-technologien.de/projekte/mrx">START-interaktiv</a> (BMFTR, February 2026 – January 2029).</p>
+<div class="funding-note">
+<img src="assets/bmftr_funding_en.svg" alt="With funding from the Federal Ministry of Research, Technology and Space" class="funding-logo">
+<p>Funded by the German Federal Ministry of Research, Technology and Space (BMFTR) within <a href="https://www.interaktive-technologien.de/projekte/mrx">START-interaktiv</a>, grant no. 16SV9585 (February 2026 – January 2029).</p>
+</div>

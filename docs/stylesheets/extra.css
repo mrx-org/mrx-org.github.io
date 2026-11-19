@@ -137,3 +137,13 @@
   margin-top: 2.5rem;
   text-align: center;
 }
+
+/* BMFTR-Förderlogo: offizielle Datei inkl. Schutzzone, immer auf Weiß (auch im Dark Mode). */
+.funding-note .funding-logo {
+  display: block;
+  width: 240px;
+  max-width: 100%;
+  margin: 0 auto .5rem;
+  background: #fff;
+  border-radius: 6px;
+}
