@@ -12,7 +12,7 @@ uploads what it measured. Start it with `uv run mrx_scanner.py`.
 
 How the scanner side works (Pulseq interpreter, `control.txt`, `position.txt`,
 the ICE program and `sync.bat`) is described in `docs/scan/scanner-setup.md` in
-the mcp-gateway repo, and the pipeline in `docs/scan/redesign.md`.
+the mcp-gateway repo, and the pipeline in `docs/scan/design.md`.
 
 In short: the script downloads every job at once, drops one at a time (or
 `--lookahead`) into the share's `inbox\\`, from where `sync.bat` puts it into
@@ -406,7 +406,7 @@ class SimulatedScanner:
 # The gateway
 # =============================================================================
 # What the engine needs from the gateway (`POST /scanner/api/sync` and the R2
-# upload in `docs/scan/redesign.md`). Only the demo exists so far; the HTTP
+# upload in `docs/scan/design.md`). Only the demo exists so far; the HTTP
 # client comes with the gateway's side.
 
 
