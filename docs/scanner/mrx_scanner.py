@@ -34,7 +34,6 @@ import os
 import random
 import secrets
 import shutil
-import subprocess
 import sys
 import time
 import warnings
@@ -51,7 +50,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Footer, Input, Label, RichLog, Static
+from textual.widgets import Button, DataTable, Footer, Label, RichLog, Static
 
 # Filled in by the session page when it hands out the script (`scanner.render_script`):
 # the session this copy belongs to. The runner secret is this script's only
@@ -82,6 +81,12 @@ SYNC_IDLE = 15.0  # seconds
 SYNC_BAT_TIMEOUT = 15.0  # seconds
 
 FINAL = frozenset({"done", "cancelled", "failed", "expired"})
+# The reason a cancel gets when it comes without one. Aborts on the scanner get
+# theirs from the data ("aborted on the scanner after k of K ADCs").
+CANCEL_REASONS = {
+    "operator": "cancelled by the operator in the scanner script",
+    "agent": "cancelled with scan_cancel",
+}
 WAIT = "wait"
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -815,7 +820,8 @@ class Engine:
     # --- what the operator and the agent can do -------------------------------
 
     def cancel(self, job: Job, by: str, reason: str = "") -> str:
-        """Cancel `job` as far as it still goes. Returns what that means."""
+        """Cancel `job` as far as it still goes. Returns what that means.
+        Without a `reason` (the operator never types one), it says who did it."""
         if job.state in FINAL:
             return "{} is already {}".format(job.name, job.state)
         task = self.tasks.pop(job.id, None)
@@ -831,8 +837,9 @@ class Engine:
             else:
                 job.discard = True
                 note = "cancelled, but it is on the scanner: it is measured unless stopped there, and the data is discarded"
-        job.by, job.reason = by, reason
-        self.set(job, "cancelled", note + (": " + reason if reason else ""))
+        job.by = by
+        job.reason = reason or CANCEL_REASONS.get(by, "cancelled by " + by)
+        self.set(job, "cancelled", note)
         return note
 
     def stays_on_scanner(self, job: Job) -> bool:
@@ -874,16 +881,8 @@ class Engine:
             self.set(new, "ready", "restart of " + job.id)
         return new
 
-    def add_reason(self, job: Job, reason: str) -> None:
-        job.reason = reason
-        self.log("job.reason", reason, job=job)
-        self._next_sync = min(self._next_sync, time.monotonic() + 0.5)
-
     def seq_path(self, job: Job) -> Path:
         return self.seq_dir / (job.id + ".seq")
-
-    def folder(self, job: Job) -> Path:
-        return self.share.measurement / job.day if job.day else self.seq_dir
 
     # --- restart safety ---------------------------------------------------------
 
@@ -933,33 +932,35 @@ STATE_STYLE = {
 LEVEL_STYLE = {"info": "", "warning": "yellow", "error": "bold red"}
 
 
-class ReasonScreen(ModalScreen[str | None]):
-    """Asks for a reason. Enter or OK returns it (maybe empty), Escape None."""
+class ConfirmScreen(ModalScreen[bool]):
+    """Asks yes or no. Enter or y confirms, Escape or n does not."""
 
-    BINDINGS = [Binding("escape", "back", "Back")]
+    BINDINGS = [
+        Binding("y", "answer(True)", "Yes"),
+        Binding("n,escape", "answer(False)", "No"),
+    ]
 
-    def __init__(self, title: str, value: str = "") -> None:
+    def __init__(self, question: str, yes: str = "Yes") -> None:
         super().__init__()
-        self.title_text = title
-        self.value = value
+        self.question = question
+        self.yes = yes
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
-            yield Label(self.title_text)
-            yield Input(value=self.value, placeholder="reason (optional)", id="reason-input")
+            yield Label(self.question)
             with Horizontal(id="dialog-buttons"):
-                yield Button("OK", variant="primary", id="ok")
-                yield Button("Back", id="back")
+                yield Button(self.yes, variant="error", id="yes", compact=True)
+                yield Button("No", id="no", compact=True)
+
+    def on_mount(self) -> None:
+        self.query_one("#yes", Button).focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         event.stop()
-        self.dismiss(self.query_one(Input).value if event.button.id == "ok" else None)
+        self.dismiss(event.button.id == "yes")
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        self.dismiss(event.value)
-
-    def action_back(self) -> None:
-        self.dismiss(None)
+    def action_answer(self, yes: bool) -> None:
+        self.dismiss(yes)
 
 
 class ScannerApp(App):
@@ -967,23 +968,22 @@ class ScannerApp(App):
     CSS = """
     #info { height: auto; padding: 0 1; background: $boost; }
     #main { height: 1fr; }
-    #jobs { width: 3fr; border: round $primary; }
-    #side { width: 2fr; }
+    #jobs { width: 2fr; border: round $primary; }
+    #side { width: 3fr; }
     #activity { height: 1fr; border: round $secondary; padding: 0 1; }
     #details { height: auto; border: round $secondary; padding: 0 1; }
-    #actions { height: auto; margin-top: 1; }
-    #actions Button { margin-right: 1; min-width: 8; }
+    #actions { height: auto; margin-bottom: 1; }
+    #actions Button { margin-right: 2; }
     #log { height: 10; border: round $secondary; }
-    ReasonScreen { align: center middle; }
+    ConfirmScreen { align: center middle; }
     #dialog { width: 70; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
     #dialog-buttons { height: auto; margin-top: 1; }
+    #dialog-buttons Button { margin-right: 2; }
     """
     BINDINGS = [
         Binding("c", "cancel", "Cancel"),
         Binding("u", "retry('upload')", "Retry upload"),
         Binding("m", "retry('measure')", "Re-measure"),
-        Binding("r", "reason", "Reason"),
-        Binding("o", "open_folder", "Folder"),
         Binding("f", "toggle_finished", "Hide finished"),
         Binding("t", "copy_token", "Copy token"),
         Binding("a", "sim_abort", "Sim: abort"),
@@ -1007,13 +1007,11 @@ class ScannerApp(App):
             with Vertical(id="side"):
                 yield Static(id="activity")
                 with Vertical(id="details"):
-                    yield Static(id="detail")
                     with Horizontal(id="actions"):
-                        yield Button("Cancel", id="cancel", variant="error")
-                        yield Button("Retry upload", id="retry-upload")
-                        yield Button("Re-measure", id="retry-measure")
-                        yield Button("Reason", id="reason")
-                        yield Button("Folder", id="open-folder")
+                        yield Button("Cancel", id="cancel", variant="error", compact=True)
+                        yield Button("Retry upload", id="retry-upload", compact=True)
+                        yield Button("Re-measure", id="retry-measure", compact=True)
+                    yield Static(id="detail")
         yield RichLog(id="log", markup=False, wrap=True)
         yield Footer()
 
@@ -1086,7 +1084,9 @@ class ScannerApp(App):
             state = Text(job.state, style=STATE_STYLE.get(job.state, ""))
             if job.state == "cancelled" and job.on_scanner:
                 state.append(" (on scanner)", style="dim")
-            message = Text(job.message[:60], style="dim")
+            # The whole message is in the details; here it must not widen the table
+            short = job.message if len(job.message) <= 28 else job.message[:27] + "…"
+            message = Text(short, style="dim")
             if job.id not in self._rows:
                 created = datetime.fromtimestamp(job.created).strftime("%H:%M:%S")
                 table.add_row(created, job.login, job.name, state, message, key=job.id)
@@ -1157,8 +1157,6 @@ class ScannerApp(App):
         self.query_one("#cancel", Button).disabled = job is None or job.state in FINAL
         self.query_one("#retry-upload", Button).disabled = not upload
         self.query_one("#retry-measure", Button).disabled = not measure
-        self.query_one("#reason", Button).disabled = job is None or job.state not in ("cancelled", "failed")
-        self.query_one("#open-folder", Button).disabled = job is None
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         if action in ("sim_abort", "sim_restart"):
@@ -1171,8 +1169,6 @@ class ScannerApp(App):
         if action == "retry":
             upload, measure = self.engine.can_retry(job)
             return True if (upload if parameters and parameters[0] == "upload" else measure) else None
-        if action == "reason":
-            return True if job is not None and job.state in ("cancelled", "failed") else None
         return True
 
     # --- events and actions ----------------------------------------------------
@@ -1188,8 +1184,6 @@ class ScannerApp(App):
             "cancel": "cancel",
             "retry-upload": "retry('upload')",
             "retry-measure": "retry('measure')",
-            "reason": "reason",
-            "open-folder": "open_folder",
         }.get(event.button.id or "")
         if action:
             await self.run_action(action)
@@ -1198,17 +1192,17 @@ class ScannerApp(App):
         job = self.job()
         if job is None or job.state in FINAL:
             return
-        title = "Cancel {} (job {})?".format(job.name, job.id)
+        question = "Cancel {} (job {} from {})?".format(job.name, job.id, job.login)
         if self.engine.stays_on_scanner(job):
-            title += "\nIt is already on the scanner: it is still measured unless you stop it there."
+            question += "\n\nIt is already on the scanner: it is still measured unless you stop it there, and its data is discarded."
 
-        def done(reason: str | None) -> None:
-            if reason is not None:
-                note = self.engine.cancel(job, "operator", reason)
+        def done(yes: bool | None) -> None:
+            if yes and job.state not in FINAL:
+                note = self.engine.cancel(job, "operator")
                 self.notify(note, severity="warning" if "on the scanner" in note else "information")
                 self.refresh_views()
 
-        self.push_screen(ReasonScreen(title), done)
+        self.push_screen(ConfirmScreen(question, yes="Cancel job"), done)
 
     async def action_retry(self, mode: str) -> None:
         job = self.job()
@@ -1221,31 +1215,6 @@ class ScannerApp(App):
             return
         self.selected = new.id
         self.refresh_views()
-
-    def action_reason(self) -> None:
-        job = self.job()
-        if job is None or job.state not in ("cancelled", "failed"):
-            return
-
-        def done(reason: str | None) -> None:
-            if reason:
-                self.engine.add_reason(job, reason)
-                self.refresh_views()
-
-        self.push_screen(ReasonScreen("Reason for {} (job {})".format(job.name, job.id), job.reason), done)
-
-    def action_open_folder(self) -> None:
-        job = self.job()
-        if job is None:
-            return
-        folder = self.engine.folder(job)
-        try:
-            if sys.platform == "win32":
-                os.startfile(folder)  # noqa: S606 - opens Explorer
-            else:
-                subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(folder)])
-        except OSError as e:
-            self.notify("cannot open {}: {}".format(folder, e), severity="error")
 
     def action_toggle_finished(self) -> None:
         self.hide_finished = not self.hide_finished

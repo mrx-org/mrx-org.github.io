@@ -241,6 +241,7 @@ def test_tui_shows_jobs_and_cancels(tmp_path):
             await pilot.press("enter")
             await pilot.pause()
             assert ready.state == "cancelled" and ready.by == "operator"
+            assert ready.reason == ms.CANCEL_REASONS["operator"]  # never typed in
             await pilot.press("f")  # hide finished
             await pilot.pause(0.6)
             assert table.row_count == 2
