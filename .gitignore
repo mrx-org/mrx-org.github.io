@@ -1,2 +1,5 @@
 /.cache
 __pycache__/
+mrx_scanner_data/
+scan-log-*.jsonl
+.pytest_cache/

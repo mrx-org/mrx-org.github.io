@@ -49,9 +49,11 @@
 <header><img src="../assets/favicon.svg" alt=""><a href="/">MRX</a></header>
 <h1>Scanner session</h1>
 <p>Connects a scanner to the MRX gateway. Creating a session downloads
-<code>mrx_scanner.py</code>, which runs on the PC next to the scanner (Python 3.8
-or newer with numpy), and shows the scan token to give to the people who may
-measure on it. A session ends 4 hours after it was last used.</p>
+<code>mrx_scanner.py</code>, which runs on the bridge PC next to the scanner with
+<a href="https://docs.astral.sh/uv/">uv</a> (it brings its own Python and packages),
+and shows the scan token to give to the people who may measure on it. The scanner
+PC has to run <code>sync.bat</code>, which takes the sequences from the share's
+<code>inbox</code>. A session ends 4 hours after it was last used.</p>
 <p><label><input type="checkbox" id="conjugate" checked> <b>Complex conjugate signal:</b>
 Siemens scanners don't follow the physical convention of MRX. Checking this box will
 complex conjugate the measured signal before upload.</label></p>
@@ -199,13 +201,17 @@ async function create() {
   link.click();
 
   app.innerHTML =
-    `<p><b>${text(s.file_name)}</b> was downloaded. Run it on the scanner PC:</p>
-     <pre>python ${text(s.file_name)}</pre>
+    `<p><b>${text(s.file_name)}</b> was downloaded. Start <code>sync.bat</code> on the
+     scanner PC, then the Pulseq interpreter, then this on the bridge PC:</p>
+     <pre>uv run ${text(s.file_name)}</pre>
+     <p class="muted">Options: <code>--share</code> (default <code>W:\\neuroradiologie\\zaiss-mrx</code>),
+     <code>--coils</code> (20), <code>--adc-padding</code> (4), <code>--lookahead</code> (1).
+     <code>uv run ${text(s.file_name)} --demo</code> tries it without a scanner.</p>
      <p><b>Scan token</b> - give it to whoever may measure on this scanner:</p>
      <pre>${text(s.token)}</pre>
      <p>The measured signal ${conjugate ? "is" : "is <b>not</b>"} complex conjugated before upload.</p>
      <p>They measure with <code>scan(sequence="&lt;hash of the .seq&gt;", scanner="${text(s.token)}")</code>.
-     The script prints the token too.</p>
+     The script shows the token too.</p>
      <button id="again">Create another session</button>`;
   document.getElementById("again").onclick = run(create);
 }
