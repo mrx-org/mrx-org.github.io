@@ -1,40 +1,57 @@
-"""The scanner-side script: runs on the PC next to a scanner, takes the sequences
-queued for it from the gateway, has the Pulseq interpreter measure them and
-uploads what it measured. See `docs/scan/design.md` in the mcp-gateway repo for
-why it works this way.
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "httpx>=0.28",
+#     "numpy>=1.23",
+#     "textual>=8",
+# ]
+# ///
+"""The scanner-side script: runs on the bridge PC next to a scanner, takes the
+sequences queued for it from the gateway, has the scanner measure them and
+uploads what it measured. Start it with `uv run mrx_scanner.py`.
+
+How the scanner side works (Pulseq interpreter, `control.txt`, `position.txt`,
+the ICE program and `sync.bat`) is described in `docs/scan/scanner-setup.md` in
+the mcp-gateway repo, and the pipeline in `docs/scan/redesign.md`.
+
+In short: the script downloads every job at once, drops one at a time (or
+`--lookahead`) into the share's `inbox\\`, from where `sync.bat` puts it into
+`control.txt`, reads what the scanner does from the share's `status\\`, and
+converts and uploads each `.seq.dat` once it is there.
 
 This file lives only here, next to the session page on mrx-org.github.io
 (`docs/scanner/`), which hands it out with a session's secrets filled in. The
 gateway keeps its own copy of `adc_sample_counts` (`scan/seq.py`) - change both
-together. It runs on whatever Python
-that PC has. So it is one file, needs nothing but numpy
-(which a standard Python or conda install on Windows comes with) and stays
-Python 3.8 compatible: no `requests`, no `match`, no `X | Y` annotations.
-
-Everything that runs lives behind functions, so that it can be imported to test.
+together.
 """
 
+from __future__ import annotations
+
 import argparse
-import hashlib
-import http.client
-import io
+import asyncio
 import json
 import os
 import random
-import re
-import socket
+import secrets
+import shutil
+import subprocess
 import sys
-import tempfile
-import threading
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 import warnings
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
-from typing import Callable, List, Optional, Tuple
+from pathlib import Path, PureWindowsPath
+from typing import Callable, Protocol
 
 import numpy as np
+from rich.progress_bar import ProgressBar
+from rich.table import Table
+from rich.text import Text
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.containers import Horizontal, Vertical
+from textual.screen import ModalScreen
+from textual.widgets import Button, DataTable, Footer, Input, Label, RichLog, Static
 
 # Filled in by the session page when it hands out the script (`scanner.render_script`):
 # the session this copy belongs to. The runner secret is this script's only
@@ -48,22 +65,30 @@ OPERATOR = "__MRX_OPERATOR__"
 # copy that was not filled in conjugates too).
 CONJUGATE = "__MRX_CONJUGATE__" != "no"
 
+VERSION = "2.0.0-dev"
+
 # The defaults for the site this was built for; every one can be overridden
-DEFAULT_MEASUREMENT_DIR = r"W:\neuroradiologie\zaiss-mrx\measurement"
-DEFAULT_SCANNER_MEASUREMENT_DIR = "C:/ProgramData/Siemens/Numaris/MriCustomer/CustomerSeq/pulseq/seq-files/measurement/"
-DEFAULT_CONTROL_FILE = r"W:\neuroradiologie\zaiss-mrx\control\control.txt"
+DEFAULT_SHARE = r"W:\neuroradiologie\zaiss-mrx"
 DEFAULT_COILS = 20
 DEFAULT_ADC_PADDING = 4
 
-# How often an idle script asks for work. Every request is also the heartbeat
-# the gateway uses to tell whether the scanner is online (30 s), so this has to
-# stay well below that.
-POLL_INTERVAL = 3.0  # seconds
-# Network failures are retried, waiting twice as long each time up to this
-MAX_BACKOFF = 60.0  # seconds
-# The interpreter's control file: a list of .seq paths that ends in this keyword
+# How often the script talks to the gateway: often while a job is on its way,
+# rarely when idle (the Cloudflare Workers free plan allows 100,000 requests a
+# day for everything).
+SYNC_ACTIVE = 2.0  # seconds
+SYNC_IDLE = 15.0  # seconds
+# `sync.bat` writes its heartbeat every ~3 s. One that has not changed for this
+# long means it is not running.
+SYNC_BAT_TIMEOUT = 15.0  # seconds
+
+FINAL = frozenset({"done", "cancelled", "failed", "expired"})
 WAIT = "wait"
-STATE_FILE = ".mrx_scanner_state.json"
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+class ScanError(Exception):
+    """A failure meant for the operator, worded for them."""
+
 
 # =============================================================================
 # Pulseq: how long every ADC event is
@@ -79,9 +104,8 @@ _BLOCK_ADC_COLUMN = 7
 _ADC_NUM_COLUMN = 2
 
 
-def adc_sample_counts(seq_text: str) -> List[int]:
-    """`num_samples` of every ADC event, in the order the blocks play them."""
-    sections = {}  # type: dict
+def _sections(seq_text: str) -> dict:
+    sections: dict = {}
     current = None
     for raw in seq_text.splitlines():
         line = raw.split("#", 1)[0].strip()
@@ -92,10 +116,13 @@ def adc_sample_counts(seq_text: str) -> List[int]:
             sections.setdefault(current, [])
         elif current is not None:
             sections[current].append(line.split())
+    return sections
 
-    adc_nums = {}
-    for cols in sections.get("[ADC]", []):
-        adc_nums[int(cols[0])] = int(cols[_ADC_NUM_COLUMN - 1])
+
+def adc_sample_counts(seq_text: str) -> list[int]:
+    """`num_samples` of every ADC event, in the order the blocks play them."""
+    sections = _sections(seq_text)
+    adc_nums = {int(cols[0]): int(cols[_ADC_NUM_COLUMN - 1]) for cols in sections.get("[ADC]", [])}
 
     counts = []
     for cols in sections.get("[BLOCKS]", []):
@@ -110,39 +137,63 @@ def adc_sample_counts(seq_text: str) -> List[int]:
     return counts
 
 
+def seq_duration(seq_text: str) -> float | None:
+    """`TotalDuration` from `[DEFINITIONS]` in seconds, if the sequence has it."""
+    for cols in _sections(seq_text).get("[DEFINITIONS]", []):
+        if cols[0] == "TotalDuration" and len(cols) > 1:
+            try:
+                return float(cols[1])
+            except ValueError:
+                return None
+    return None
+
+
+def demo_seq(adcs: int, samples: int, duration: float) -> str:
+    """A minimal Pulseq file with `adcs` readouts, enough for everything this
+    script reads from a sequence. For `--demo` and the tests."""
+    blocks = "\n".join("{} 100 0 0 0 0 1 0".format(i + 1) for i in range(adcs))
+    return (
+        "# made by mrx_scanner.py --demo\n[VERSION]\nmajor 1\nminor 4\nrevision 1\n\n"
+        "[DEFINITIONS]\nTotalDuration {:g}\n\n"
+        "[BLOCKS]\n# id dur rf gx gy gz adc ext\n{}\n\n"
+        "[ADC]\n# id num dwell delay q phi\n1 {} 10000 0 0 0\n".format(duration, blocks, samples)
+    )
+
+
 # =============================================================================
 # `.seq.dat` -> `signal.npy`
 # =============================================================================
-# The interpreter writes one `<re> <im>` line per sample, nested ADC -> coil ->
+# The ICE program writes one `<re> <im>` line per sample, nested ADC -> coil ->
 # sample, with `padding` samples nobody understands at the end of every coil's
-# readout (see `scan-plan/dat-format.md`). What `scan` hands out is the same
+# readout (see `docs/scan/dat-format.md`). What `scan` hands out is the same
 # signal as `(ADC samples, coils)`: row k is sample k of every coil.
 
 
-def expected_lines(adc_counts: List[int], coils: int, padding: int) -> int:
+def expected_lines(adc_counts: list[int], coils: int, padding: int) -> int:
     return coils * sum(n + padding for n in adc_counts)
 
 
-def numpy_too_old_for_fast_loadtxt(version: Optional[str] = None) -> bool:
-    """Whether numpy (or `version`) is older than 1.23, the first with a fast
-    `np.loadtxt`, which `read_dat` relies on for large files."""
-    m = re.match(r"(\d+)\.(\d+)", version or np.__version__)
-    return m is not None and (int(m.group(1)), int(m.group(2))) < (1, 23)
+def whole_adcs(n_lines: int, adc_counts: list[int], coils: int, padding: int) -> int | None:
+    """How many ADCs `n_lines` lines hold, if they end exactly after one. An
+    aborted measurement leaves such a `.seq.dat`: fewer ADCs, but whole ones."""
+    total = 0
+    for k, n in enumerate(adc_counts):
+        if total == n_lines:
+            return k
+        total += coils * (n + padding)
+    return len(adc_counts) if total == n_lines else None
 
 
 def read_dat(dat) -> np.ndarray:
     """Every `<re> <im>` line of a `.seq.dat` (a path or an open text file) as
-    one flat complex64 array, in file order. `np.loadtxt` parses straight into
-    float32, so a large file costs about its signal's size in memory rather
-    than the several times that splitting its text does. Raises `ValueError` if
-    a line is not two numbers."""
+    one flat complex64 array, in file order. Raises `ValueError` if a line is
+    not two numbers."""
     try:
         with warnings.catch_warnings():
-            # An empty file is no different from one cut short: `convert` says so
+            # An empty file is no different from one cut short: the caller says so
             warnings.simplefilter("ignore", UserWarning)
             values = np.loadtxt(dat, dtype=np.float32, ndmin=2)
     except ValueError as e:
-        # Without numpy's advice to use `usecols`, which is not ours to take
         raise ValueError("every line of the .seq.dat must be '<re> <im>': {}".format(str(e).split(";")[0]))
     if values.size == 0:
         return np.zeros(0, dtype="<c8")
@@ -151,20 +202,15 @@ def read_dat(dat) -> np.ndarray:
     return np.ascontiguousarray(values, dtype="<f4").view("<c8").ravel()
 
 
-def convert(samples: np.ndarray, adc_counts: List[int], coils: int, padding: int) -> np.ndarray:
+def convert(samples: np.ndarray, adc_counts: list[int], coils: int, padding: int) -> np.ndarray:
     """The samples from `read_dat` as complex64 of shape `(ADC samples, coils)`.
-    Raises `ValueError` if they do not have the layout the arguments describe -
-    the usual cause is a wrong `--coils` or `--adc-padding`, or a file that was
-    cut short."""
+    Raises `ValueError` if they do not have the layout the arguments describe."""
     expected = expected_lines(adc_counts, coils, padding)
     if len(samples) != expected:
         raise ValueError(
             "the .seq.dat has {} lines, but {} coils x (ADC samples + {} padding) "
-            "for this sequence make {} - check --coils and --adc-padding".format(
-                len(samples), coils, padding, expected
-            )
+            "for this sequence make {} - check --coils and --adc-padding".format(len(samples), coils, padding, expected)
         )
-
     parts, offset = [], 0
     for n in adc_counts:
         # One ADC is `coils` readouts of `n + padding` samples in a row; its
@@ -177,885 +223,1102 @@ def convert(samples: np.ndarray, adc_counts: List[int], coils: int, padding: int
     return np.concatenate(parts).astype("<c8", copy=False)
 
 
-def npy_bytes(signal: np.ndarray) -> bytes:
-    """`signal` from `convert` as the contents of a `.npy` file."""
-    out = io.BytesIO()
-    np.save(out, signal, allow_pickle=False)
-    return out.getvalue()
-
-
-def npy_shape(path: str) -> Optional[Tuple[int, int]]:
-    """The shape of a signal saved by `upload`, from the `.npy` header alone -
-    None if the file is not a complete 2-D complex64 `.npy` (then it is
-    converted again)."""
-    try:
-        with open(path, "rb") as f:
-            version = np.lib.format.read_magic(f)
-            if version == (1, 0):
-                shape, _, dtype = np.lib.format.read_array_header_1_0(f)
-            else:
-                shape, _, dtype = np.lib.format.read_array_header_2_0(f)
-            header_end = f.tell()
-    except (OSError, ValueError):
-        return None
-    # Fortran order is fine: `convert` usually returns that, the shape is the same
-    if len(shape) != 2 or dtype != np.dtype("<c8"):
-        return None
-    if os.path.getsize(path) != header_end + shape[0] * shape[1] * dtype.itemsize:
-        return None
-    return int(shape[0]), int(shape[1])
-
-
-def fake_dat(adc_counts: List[int], coils: int, padding: int, rng: "random.Random" = None) -> str:
-    """Noise in the interpreter's layout, which is what `--simulate` writes in
-    place of a measurement - so the conversion above runs on it too."""
-    rng = rng or random.Random()
-    lines = []
-    for _ in range(expected_lines(adc_counts, coils, padding)):
-        lines.append("{:.6f} {:.6f}".format(rng.gauss(0, 1), rng.gauss(0, 1)))
-    return "\n".join(lines) + "\n"
-
-
-# =============================================================================
-# The control file and the measurement folder
-# =============================================================================
-# The Pulseq interpreter loops over `control.txt`: a list of `.seq` paths, as
-# the scanner sees them, ending in `wait`. It remembers how far it got and runs
-# whatever is appended, so a new sequence is measured by putting its line in
-# front of the `wait`. Earlier lines are never touched - the interpreter counts
-# them - and the operator may edit the file by hand, so it is read fresh every
-# time rather than kept.
-
-
-def scanner_path(scanner_dir: str, date: str, file_name: str) -> str:
-    """A file in the dated folder, as the scanner sees it. Forward slashes, as
-    `update_control_file` always wrote them."""
-    return "/".join([scanner_dir.replace("\\", "/").rstrip("/"), date, file_name])
-
-
-def append_to_control_file(control_file: str, line: str) -> bool:
-    """Put `line` before the trailing `wait`, the way `update_control_file` does:
-    drop the `wait`, append, add `wait` again, rewrite the file. False if the
-    line is already in the file, which a restarted script must not add twice.
-
-    Unlike `update_control_file`, blank lines after the `wait` and a last line
-    without a newline - what a hand edit leaves behind - do not make it keep a
-    `wait` in the middle of the list."""
-    with open(control_file, "r") as f:
-        lines = f.read().splitlines()
-
-    if any(existing.strip() == line for existing in lines):
-        return False
-
-    while lines and not lines[-1].strip():
-        lines.pop()
-    if lines and lines[-1].strip() == WAIT:
-        lines.pop()
-
-    with open(control_file, "w") as f:
-        f.writelines(existing + "\n" for existing in lines + [line, WAIT])
-    return True
-
-
-def write_atomic(path: str, data: bytes) -> None:
-    """Write to `<path>.tmp`, then rename, so nobody reads half a file - as
-    `download_file_atomic` does."""
-    tmp = path + ".tmp"
-    with open(tmp, "wb") as f:
-        f.write(data)
+def write_fake_dat(path: Path, adc_counts: list[int], coils: int, padding: int, rng=None) -> None:
+    """Noise in the ICE program's layout, which the simulated scanner writes in
+    place of a measurement - so the conversion runs on it too."""
+    lines = expected_lines(adc_counts, coils, padding)
+    data = (rng or np.random.default_rng()).standard_normal((lines, 2)).astype(np.float32)
+    tmp = path.with_name(path.name + ".tmp")
+    np.savetxt(tmp, data, fmt="%.6f")
     os.replace(tmp, path)
 
 
-def wait_until_stable(
-    path: str,
-    check: Callable[[], None] = lambda: None,
-    interval: float = 1.0,
-    stable_checks: int = 2,
-    sleep: Callable[[float], None] = time.sleep,
-) -> None:
-    """Wait for the interpreter to finish writing `path`: it exists and its size
-    did not change for `stable_checks` checks in a row (as
-    `wait_until_local_file_is_stable` does). `check` runs on every round and
-    ends the wait by raising - which is how a skip or a timeout gets in."""
-    last_size, stable = -1, 0
-    while True:
-        check()
-        if os.path.exists(path):
-            size = os.path.getsize(path)
-            if size == last_size:
-                stable += 1
-                if stable >= stable_checks:
-                    return
-            else:
-                stable = 0
-            last_size = size
-        sleep(interval)
+def write_atomic(path: Path, data: bytes) -> None:
+    """Write to `<path>.tmp`, then rename, so nobody reads half a file."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
+def size(n_bytes: float) -> str:
+    for unit in ("B", "kB", "MB"):
+        if n_bytes < 1000:
+            return "{:.0f} {}".format(n_bytes, unit) if unit == "B" else "{:.1f} {}".format(n_bytes, unit)
+        n_bytes /= 1000
+    return "{:.1f} GB".format(n_bytes)
+
+
+def clock(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    return "{}:{:02d}".format(seconds // 60, seconds % 60)
 
 
 # =============================================================================
-# Talking to the gateway
+# The share: inbox, status, measurement
 # =============================================================================
+# See `docs/scan/scanner-setup.md`. The script writes only into `inbox\\` (and
+# its converted signals next to the `.seq.dat`); everything else is `sync.bat`'s.
 
 
-class SessionEnded(Exception):
-    """The gateway does not know this script's session (any more). Nothing
-    helps but a new script from `/scanner/new`."""
+@dataclass
+class ScannerStatus:
+    """What `sync.bat` last published: its run, its round, its date, the
+    interpreter's `control.txt` and how many lines of it it has read."""
+
+    run: str
+    beat: int
+    today: str
+    lines: list[str]
+    position: int
+
+    def find(self, name: str) -> tuple[int, str] | None:
+        """Line (from 1) and date folder of the `.seq` called `name`."""
+        for i, line in enumerate(self.lines, 1):
+            path = PureWindowsPath(line.strip())
+            if path.name == name:
+                return i, path.parent.name
+        return None
 
 
-class JobEnded(Exception):
-    """The gateway refused a report for the job: it ended there (it was failed
-    for an offline scanner, or its session ended), so it is dropped here."""
+class Share:
+    def __init__(self, root: Path) -> None:
+        self.root = Path(root)
+        self.inbox = self.root / "inbox"
+        self.status_dir = self.root / "status"
+        self.measurement = self.root / "measurement"
 
+    def check(self) -> list[str]:
+        """What is missing for the script to work."""
+        if not self.root.is_dir():
+            return ["share not found: {}".format(self.root)]
+        if not self.inbox.is_dir():
+            return ["no inbox at {} - is the new sync.bat running on the scanner PC?".format(self.inbox)]
+        return []
 
-def timed_connection(base, timings: dict):
-    """`base` (an `http.client` connection class) that writes into `timings`
-    when it finished connecting (TCP, proxy tunnel and TLS: "connected") and
-    when it last sent something ("sent"), so a transfer can be told apart from
-    setting up the connection."""
+    def drop(self, name: str, data: bytes) -> None:
+        write_atomic(self.inbox / name, data)
 
-    class Timed(base):
-        def connect(self):
-            super().connect()
-            timings["connected"] = time.monotonic()
+    def in_inbox(self, name: str) -> bool:
+        return (self.inbox / name).exists()
 
-        def send(self, data):
-            super().send(data)
-            timings["sent"] = time.monotonic()
-
-    return Timed
-
-
-def timed_opener(timings: dict):
-    """A urllib opener like `urlopen`'s - same proxies - that times its
-    connections into `timings`."""
-
-    class Http(urllib.request.HTTPHandler):
-        def http_open(self, req):
-            return self.do_open(timed_connection(http.client.HTTPConnection, timings), req)
-
-    class Https(urllib.request.HTTPSHandler):
-        def https_open(self, req):
-            # No context, like `urlopen`'s handler: the default one checks the certificate
-            return self.do_open(timed_connection(http.client.HTTPSConnection, timings), req)
-
-    return urllib.request.build_opener(Http, Https)
-
-
-def transfer_report(n_bytes: int, timings: dict, upload: bool) -> str:
-    """Where the time of a request went: setting up the connection, the
-    transfer itself and waiting for the server. The rate counts the transfer
-    alone, so it is the line's, not the server's or the handshake's.
-
-    For an upload the transfer runs from connected to the body sent, then the
-    server checks it before it answers. For a download the server answers
-    first, then the body is read."""
-    start, connected = timings["start"], timings.get("connected", timings["start"])
-    sent, response, done = timings.get("sent", connected), timings["response"], timings["done"]
-    if upload:
-        transfer, server = sent - connected, response - sent
-    else:
-        transfer, server = done - response, response - sent
-    return "{} in {}: connecting {}, transfer {} ({:.1f} MB/s), server {}".format(
-        size(n_bytes),
-        duration(done - start),
-        duration(connected - start),
-        duration(transfer),
-        n_bytes / 1e6 / max(transfer, 1e-3),
-        duration(server),
-    )
-
-
-def proxies() -> str:
-    """The proxies urllib uses (environment, or the system settings on Windows
-    and macOS), without passwords."""
-    found = urllib.request.getproxies()
-    if not found:
-        return "none (direct connection)"
-
-    def hide_password(url: str) -> str:
-        parts = urllib.parse.urlsplit(url)
-        if "@" not in parts.netloc:
-            return url
-        return urllib.parse.urlunsplit(parts._replace(netloc="***@" + parts.netloc.rsplit("@", 1)[1]))
-
-    return ", ".join("{}={}".format(scheme, hide_password(url)) for scheme, url in sorted(found.items()))
-
-
-class Api:
-    """`/scanner/api/*`, authenticated by the runner secret. Network failures and
-    server errors are retried with backoff for as long as it takes (the site's
-    connection is expected to come back), anything else is raised."""
-
-    def __init__(self, base_url: str, secret: str, say: Callable[..., None]) -> None:
-        self.base_url = base_url.rstrip("/")
-        self.secret = secret
-        self.say = say
-
-    def request(
-        self,
-        method: str,
-        path: str,
-        data: Optional[bytes] = None,
-        headers: Optional[dict] = None,
-        auth: bool = True,
-        timeout: float = 60,
-        timings: Optional[dict] = None,
-    ):
-        """`(status, body)` of the response. A `timings` dict gets the
-        `time.monotonic()` of the successful attempt's steps (see
-        `transfer_report`)."""
-        url = path if path.startswith("http") else self.base_url + path
-        headers = dict(headers or {})
-        if auth:
-            headers["Authorization"] = "Bearer " + self.secret
-        delay = POLL_INTERVAL
-        while True:
-            req = urllib.request.Request(url, data=data, headers=headers, method=method)
-            try:
-                if timings is None:
-                    with urllib.request.urlopen(req, timeout=timeout) as res:
-                        return res.status, res.read()
-                timings.clear()
-                timings["start"] = time.monotonic()
-                with timed_opener(timings).open(req, timeout=timeout) as res:
-                    timings["response"] = time.monotonic()
-                    body = res.read()
-                    timings["done"] = time.monotonic()
-                    return res.status, body
-            except urllib.error.HTTPError as e:
-                body = e.read().decode("utf-8", "replace")
-                if e.code in (401, 410):
-                    raise SessionEnded(body)
-                if e.code < 500:
-                    raise JobEnded("{} {}: {} {}".format(method, path, e.code, body))
-                problem = "server error {}".format(e.code)
-            except (urllib.error.URLError, socket.timeout, ConnectionError) as e:
-                problem = "network error ({})".format(getattr(e, "reason", e))
-            self.say("{} - retrying in {:.0f} s".format(problem, delay), YELLOW)
-            time.sleep(delay)
-            delay = min(delay * 2, MAX_BACKOFF)
-
-    def next_job(self, have: List[str]) -> Optional[dict]:
-        """The next job the script does not `have` yet, if the gateway has one
-        for it."""
-        query = "?have=" + ",".join(have) if have else ""
-        status, body = self.request("GET", "/scanner/api/next" + query)
-        return json.loads(body) if status == 200 else None
-
-    def report(self, job_id: str, state: str, message: str = "", log: Optional[List[str]] = None) -> None:
-        body = json.dumps({"state": state, "message": message, "log": log or []}).encode()
-        self.request(
-            "POST",
-            "/scanner/api/jobs/{}/state".format(job_id),
-            body,
-            {"Content-Type": "application/json"},
-        )
-
-    def upload(self, job_id: str, name: str, data: bytes, headers: Optional[dict] = None) -> str:
-        """Upload `data`; returns where the time went (`transfer_report`)."""
-        headers = dict(headers or {})
-        headers["X-Content-SHA256"] = hashlib.sha256(data).hexdigest()
-        headers["Content-Type"] = "application/octet-stream"
-        timings = {}
-        path = "/scanner/api/jobs/{}/files/{}".format(job_id, name)
-        self.request("PUT", path, data, headers, timeout=600, timings=timings)
-        return transfer_report(len(data), timings, upload=True)
-
-    def download(self, url: str) -> Tuple[bytes, str]:
-        """The file at `url` and where the time went (`transfer_report`)."""
-        # The files route needs no credentials, the hash is the permission
-        timings = {}
-        body = self.request("GET", url, auth=False, timings=timings)[1]
-        return body, transfer_report(len(body), timings, upload=False)
-
-
-# =============================================================================
-# The console
-# =============================================================================
-
-
-# ANSI styles for `Console.paint`
-RED, GREEN, YELLOW, CYAN, BOLD, DIM = "31", "32", "33", "36", "1", "2"
-
-
-def _enable_windows_colors() -> bool:
-    """Windows 10 and later understand ANSI codes once the console is switched
-    to it (ENABLE_VIRTUAL_TERMINAL_PROCESSING); older ones refuse."""
-    try:
-        import ctypes
-
-        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-        handle = kernel32.GetStdHandle(-11)  # standard output
-        mode = ctypes.c_uint32()
-        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+    def withdraw(self, name: str) -> bool:
+        """Take a file back out of the inbox. False if `sync.bat` has it already."""
+        try:
+            (self.inbox / name).unlink()
+            return True
+        except FileNotFoundError:
             return False
-        return bool(kernel32.SetConsoleMode(handle, mode.value | 0x0004))
-    except Exception:
-        return False
 
-
-def colors_supported(stream=None) -> bool:
-    """Colors only on a terminal that shows them - not when the output goes to
-    a file, nor with `NO_COLOR` set (https://no-color.org). `FORCE_COLOR` turns
-    them on regardless."""
-    stream = stream or sys.stdout
-    if os.environ.get("NO_COLOR"):
-        return False
-    if os.environ.get("FORCE_COLOR"):
-        return True
-    if type(stream).__module__.startswith("ipykernel"):
-        # Spyder's IPython console and Jupyter show colors, but their stdout
-        # is no terminal and says so via `isatty()`
-        return True
-    if not getattr(stream, "isatty", lambda: False)():
-        return False
-    if os.name == "nt":
-        return _enable_windows_colors()
-    return os.environ.get("TERM") != "dumb"
-
-
-def size(n_bytes: int) -> str:
-    for unit, scale in (("GB", 1e9), ("MB", 1e6), ("kB", 1e3)):
-        if n_bytes >= scale:
-            return "{:.1f} {}".format(n_bytes / scale, unit)
-    return "{} B".format(n_bytes)
-
-
-def took(since: float) -> str:
-    """How long ago the `time.monotonic()` value `since` was."""
-    return duration(time.monotonic() - since)
-
-
-def duration(seconds: float) -> str:
-    if seconds < 60:
-        return "{:.1f} s".format(seconds)
-    return "{:d} min {:02d} s".format(int(seconds // 60), int(seconds % 60))
-
-
-class Console:
-    """What the operator sees. Every line also goes to the gateway with the
-    next report, so the gateway's log shows what happened at the site - without
-    the colors."""
-
-    def __init__(self, colors: Optional[bool] = None) -> None:
-        self.pending = []  # type: List[str]
-        self.lock = threading.Lock()
-        self.colors = colors_supported() if colors is None else colors
-
-    def paint(self, text: str, *styles: str) -> str:
-        if not self.colors or not styles:
-            return text
-        return "\033[{}m{}\033[0m".format(";".join(styles), text)
-
-    def say(self, message: str, *styles: str) -> None:
-        stamp = "[{}]".format(datetime.now().strftime("%H:%M:%S"))
-        print("{} {}".format(self.paint(stamp, DIM), self.paint(message, *styles)), flush=True)
-        with self.lock:
-            self.pending.append("{} {}".format(stamp, message))
-
-    def take(self) -> List[str]:
-        with self.lock:
-            lines, self.pending = self.pending, []
-        return lines
-
-
-class SkipReader:
-    """Reads the console on a thread of its own, so typing `s` + Enter can stop
-    the wait for a measurement on Windows as well as Linux (no `select` on a
-    Windows console)."""
-
-    def __init__(self, stream=None) -> None:
-        self.stream = stream or sys.stdin
-        self.requested = threading.Event()
-
-    def start(self) -> "SkipReader":
-        threading.Thread(target=self._read, daemon=True).start()
-        return self
-
-    def _read(self) -> None:
-        for line in self.stream:
-            if line.strip().lower() == "s":
-                self.requested.set()
-
-
-class Skipped(Exception):
-    pass
-
-
-# =============================================================================
-# Restart safety
-# =============================================================================
-# The jobs in flight and how far each got, so a restarted script carries on with
-# them rather than appending them to the control file a second time. The gateway
-# hands a restarted script the same jobs again; this says what was already done.
-
-
-class State:
-    def __init__(self, path: str, session: str) -> None:
-        self.path = path
-        # Which session the file is about: a script of a new session must not
-        # resume the jobs of an old one.
-        self.session = session
-
-    def _read(self) -> dict:
+    def read_status(self) -> ScannerStatus | None:
         try:
-            with open(self.path, "r") as f:
-                state = json.load(f)
-        except (OSError, ValueError):
-            return {}
-        if state.get("session") != self.session:
-            return {}
-        if "jobs" not in state and "job" in state:
-            # Written by a script that had one job at a time
-            return {state["job"]: state}
-        return state.get("jobs") or {}
+            beat = (self.status_dir / "heartbeat.txt").read_text().split()
+            lines = (self.status_dir / "control.txt").read_text(errors="replace").splitlines()
+            position = int((self.status_dir / "position.txt").read_text().strip() or 0)
+            return ScannerStatus(beat[0], int(beat[1]), beat[2], lines, position)
+        except (OSError, ValueError, IndexError):
+            return None
 
-    def load(self, job_id: str) -> dict:
-        return dict(self._read().get(job_id) or {})
+    def dat(self, day: str, name: str) -> Path:
+        return self.measurement / day / (name + ".dat")
 
-    def save(self, job_id: str, entry: dict) -> None:
-        jobs = self._read()
-        jobs[job_id] = entry
-        write_atomic(self.path, json.dumps({"session": self.session, "jobs": jobs}).encode())
+    def dat_in_transfer(self, day: str, name: str) -> bool:
+        return (self.measurement / day / (name + ".dat.tmp")).exists()
 
-    def drop(self, job_id: str) -> None:
-        jobs = self._read()
-        jobs.pop(job_id, None)
-        if jobs:
-            write_atomic(self.path, json.dumps({"session": self.session, "jobs": jobs}).encode())
+
+class SimulatedScanner:
+    """Plays `sync.bat`, the Pulseq interpreter and the ICE program on a local
+    folder with the share's layout, for `--simulate`. Every `tick` is one round
+    of `sync.bat`; a measurement takes the sequence's `TotalDuration` (or
+    `duration`) and then writes noise as its `.seq.dat`."""
+
+    HOST = r"C:\ProgramData\Siemens\Numaris\MriCustomer\CustomerSeq\pulseq\seq-files\measurement"
+
+    def __init__(self, share: Share, coils: int, padding: int, duration: float | None = None) -> None:
+        self.share = share
+        self.coils = coils
+        self.padding = padding
+        self.duration = duration
+        for folder in (share.inbox, share.status_dir, share.measurement):
+            folder.mkdir(parents=True, exist_ok=True)
+        self.beat = 0
+        self.current: dict | None = None
+        self.restart()
+
+    def restart(self) -> None:
+        """What a restart of `sync.bat` does: a fresh `control.txt`. A
+        measurement in progress goes on."""
+        self.run = datetime.now().strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
+        self.lines: list[str] = []
+        self.position = 0
+        self._publish()
+
+    def abort(self) -> bool:
+        """The supervisor stops the measurement: half of it is written."""
+        if self.current is None:
+            return False
+        self._finish(abort=True)
+        return True
+
+    def tick(self) -> None:
+        today = datetime.now().strftime("%Y%m%d")
+        for seq in sorted(self.share.inbox.glob("*.seq")):
+            if not any(PureWindowsPath(line).name == seq.name for line in self.lines):
+                self.lines.append("{}\\{}\\{}".format(self.HOST, today, seq.name))
+            target = self.share.measurement / today / seq.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(seq, target)
+
+        if self.current is not None and time.monotonic() >= self.current["end"]:
+            self._finish()
+        if self.current is None and self.position < len(self.lines) and self.lines[self.position].strip() != WAIT:
+            path = PureWindowsPath(self.lines[self.position])
+            self.position += 1
+            seq = self.share.measurement / path.parent.name / path.name
+            text = seq.read_text()
+            duration = self.duration if self.duration is not None else seq_duration(text) or 5.0
+            self.current = {"seq": seq, "counts": adc_sample_counts(text), "end": time.monotonic() + duration}
+        self._publish()
+
+    def _finish(self, abort: bool = False) -> None:
+        seq, counts = self.current["seq"], self.current["counts"]
+        if abort:
+            counts = counts[: len(counts) // 2]
+        write_fake_dat(seq.with_name(seq.name + ".dat"), counts, self.coils, self.padding)
+        self.current = None
+
+    def _publish(self) -> None:
+        self.beat += 1
+        status = self.share.status_dir
+        write_atomic(status / "control.txt", ("\r\n".join(self.lines + [WAIT]) + "\r\n").encode())
+        write_atomic(status / "position.txt", "{} \r\n".format(self.position).encode())
+        today = datetime.now().strftime("%Y%m%d")
+        write_atomic(status / "heartbeat.txt", "{} {} {}\r\n".format(self.run, self.beat, today).encode())
+
+
+# =============================================================================
+# The gateway
+# =============================================================================
+# What the engine needs from the gateway (`POST /scanner/api/sync` and the R2
+# upload in `docs/scan/redesign.md`). Only the demo exists so far; the HTTP
+# client comes with the gateway's side.
+
+
+class Gateway(Protocol):
+    async def sync(self, report: dict) -> dict:
+        """Send the script's view, get `{"jobs": [...], "cancel": [...], "version": ...}`."""
+
+    async def download(self, job: "Job") -> bytes: ...
+
+    async def upload(self, job: "Job", path: Path, progress: Callable[[int, int], None]) -> None: ...
+
+    async def abort_upload(self, job: "Job") -> None: ...
+
+    async def retry(self, job: "Job", mode: str) -> dict:
+        """A new job for `job`, which the gateway records as its retry."""
+
+
+class DemoGateway:
+    """A gateway in the process, for `--demo`: a few jobs at once, then one
+    every `every` seconds, small random sequences, uploads at a few MB/s."""
+
+    NAMES = ("gre_2d", "epi_se", "flash_3d", "tse_t2", "dream", "bssfp", "spiral")
+    LOGINS = ("jendres", "agent", "sweinmueller")
+
+    def __init__(self, first: int = 3, every: tuple[float, float] | None = (20, 60), durations=(6, 20), rng=None) -> None:
+        self.rng = rng or random.Random()
+        self.first = first
+        self.every = every
+        self.durations = durations
+        self._next = time.monotonic() + self.rng.uniform(*every) if every else float("inf")
+        self._cancels: list[dict] = []
+        self.reports: list[dict] = []
+
+    def new_job(self, **info) -> dict:
+        job = {
+            "id": secrets.token_urlsafe(6),
+            "login": self.rng.choice(self.LOGINS),
+            "name": self.rng.choice(self.NAMES),
+            "sequence_url": "",
+        }
+        job.update(info)
+        return job
+
+    def request_cancel(self, job_id: str, reason: str = "") -> None:
+        """What `scan_cancel` will do: the script hears it with its next sync."""
+        self._cancels.append({"job": job_id, "by": "agent", "reason": reason})
+
+    async def sync(self, report: dict) -> dict:
+        self.reports.append(report)
+        jobs = []
+        if self.first:
+            jobs, self.first = [self.new_job() for _ in range(self.first)], 0
+        elif time.monotonic() >= self._next:
+            jobs.append(self.new_job())
+            self._next = time.monotonic() + self.rng.uniform(*self.every)
+        cancels, self._cancels = self._cancels, []
+        return {"jobs": jobs, "cancel": cancels, "version": VERSION}
+
+    async def download(self, job: "Job") -> bytes:
+        await asyncio.sleep(self.rng.uniform(0.2, 1.0))
+        return demo_seq(self.rng.randint(16, 96), 128, self.rng.uniform(*self.durations)).encode()
+
+    async def upload(self, job: "Job", path: Path, progress: Callable[[int, int], None]) -> None:
+        total, sent = path.stat().st_size, 0
+        rate = 6e6 * self.rng.uniform(0.5, 1.2)
+        while sent < total:
+            await asyncio.sleep(0.1)
+            sent = min(total, sent + int(rate * 0.1))
+            progress(sent, total)
+
+    async def abort_upload(self, job: "Job") -> None:
+        pass
+
+    async def retry(self, job: "Job", mode: str) -> dict:
+        return self.new_job(login=job.login, name=job.name)
+
+
+# =============================================================================
+# Jobs and the log
+# =============================================================================
+
+
+@dataclass
+class Job:
+    id: str
+    login: str
+    name: str
+    sequence_url: str = ""
+    created: float = field(default_factory=time.time)
+    state: str = "downloading"
+    message: str = ""
+    by: str = ""  # who cancelled it: agent, operator or supervisor
+    reason: str = ""
+    retry_of: str = ""
+    priority: bool = False  # restarted from the TUI: measured next
+    duration: float = 0.0  # expected measurement time, from the .seq
+    # On the scanner side
+    file: str = ""  # its name in the inbox and in control.txt
+    day: str = ""  # its date folder, from control.txt
+    line: int = 0  # its line in control.txt, from 1
+    on_scanner: bool = False  # dropped and its .seq.dat not there yet
+    read: bool = False  # the interpreter has read its line
+    discard: bool = False  # cancelled once on the scanner: its data is dropped
+    measuring_since: float = 0.0
+    measured: float = 0.0
+    # Results
+    npy: str = ""
+    shape: list = field(default_factory=list)
+    partial: bool = False
+    progress: float = 0.0
+    rate: float = 0.0  # bytes per second while uploading
+    finished: float = 0.0
+
+
+class EventLog:
+    """Every event, as one JSON object per line in `scan-log-<YYYYMMDD>.jsonl`
+    in `folder`, to the TUI, and to the gateway with the next sync."""
+
+    def __init__(self, folder: Path) -> None:
+        self.folder = Path(folder)
+        self.listeners: list[Callable[[dict], None]] = []
+        self.pending: list[dict] = []
+
+    def __call__(self, event: str, message: str, level: str = "info", job: Job | None = None, **extra) -> None:
+        record = {"ts": datetime.now().isoformat(timespec="milliseconds"), "level": level, "event": event}
+        if job is not None:
+            record.update(job=job.id, name=job.name)
+        record["message"] = message
+        record.update(extra)
+        try:
+            self.folder.mkdir(parents=True, exist_ok=True)
+            path = self.folder / "scan-log-{}.jsonl".format(datetime.now().strftime("%Y%m%d"))
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record) + "\n")
+        except OSError:
+            pass  # a full or unreachable disk must not stop the measurement
+        self.pending = (self.pending + [record])[-200:]
+        for listener in self.listeners:
+            listener(record)
+
+    def take(self) -> list[dict]:
+        records, self.pending = self.pending, []
+        return records
+
+
+# =============================================================================
+# The engine
+# =============================================================================
+
+
+class Engine:
+    """Everything the script does, one `tick` at a time: talk to the gateway,
+    read what the scanner does, drop the next job, start conversions and
+    uploads. The TUI calls `tick` and shows `jobs`; the tests call it directly."""
+
+    def __init__(
+        self,
+        gateway: Gateway,
+        share: Share,
+        workdir: Path,
+        log: EventLog,
+        coils: int = DEFAULT_COILS,
+        padding: int = DEFAULT_ADC_PADDING,
+        lookahead: int = 1,
+        scanner: SimulatedScanner | None = None,
+    ) -> None:
+        self.gateway = gateway
+        self.share = share
+        self.log = log
+        self.coils = coils
+        self.padding = padding
+        self.lookahead = lookahead
+        self.scanner = scanner
+        self.seq_dir = Path(workdir) / "jobs"
+        self.seq_dir.mkdir(parents=True, exist_ok=True)
+        self.state_file = Path(workdir) / "state.json"
+        self.jobs: dict[str, Job] = {}
+        self.tasks: dict[str, asyncio.Task] = {}
+        self.status: ScannerStatus | None = None
+        self.gateway_online: bool | None = None
+        self.sync_bat_alive = False
+        self.latest_version = VERSION
+        self._next_sync = 0.0
+        self._run: str | None = None
+        self._beat: int | None = None
+        self._beat_seen = 0.0
+        self._drops = 0
+        self.load()
+
+    # --- the loop --------------------------------------------------------------
+
+    async def tick(self) -> None:
+        if self.scanner is not None:
+            self.scanner.tick()
+        if time.monotonic() >= self._next_sync:
+            await self.sync()
+        self.observe()
+        self.schedule()
+        self.save()
+
+    def busy(self) -> bool:
+        return any(job.state not in FINAL or job.on_scanner for job in self.jobs.values())
+
+    async def sync(self) -> None:
+        report = {
+            "version": VERSION,
+            "sync_bat": self.sync_bat_alive,
+            "jobs": {
+                job.id: {"state": job.state, "by": job.by, "reason": job.reason, "progress": round(job.progress, 3)}
+                for job in self.jobs.values()
+                if job.state not in FINAL or time.time() - (job.finished or job.created) < 3600
+            },
+            "log": self.log.take(),
+        }
+        try:
+            answer = await self.gateway.sync(report)
+        except Exception as e:  # noqa: BLE001 - the network, reported and retried
+            if self.gateway_online is not False:
+                self.log("gateway.offline", "gateway not reachable: {}".format(e), level="warning")
+            self.gateway_online = False
+            self._next_sync = time.monotonic() + SYNC_ACTIVE * 2
             return
+        if self.gateway_online is False:
+            self.log("gateway.online", "gateway reachable again")
+        self.gateway_online = True
+        self.latest_version = answer.get("version") or VERSION
+        for info in answer.get("jobs", []):
+            if info["id"] not in self.jobs:
+                job = self.add(info)
+                self.log("job.new", "new job from {}".format(job.login), job=job)
+                self.spawn(job, self.download(job))
+        for request in answer.get("cancel", []):
+            job = self.jobs.get(request["job"])
+            if job is not None:
+                self.cancel(job, request.get("by", "agent"), request.get("reason", ""))
+        self._next_sync = time.monotonic() + (SYNC_ACTIVE if self.busy() else SYNC_IDLE)
+
+    def add(self, info: dict, **extra) -> Job:
+        job = Job(
+            id=info["id"],
+            login=info.get("login", "?"),
+            name=info.get("name") or info["id"],
+            sequence_url=info.get("sequence_url", ""),
+            **extra,
+        )
+        self.jobs[job.id] = job
+        return job
+
+    def spawn(self, job: Job, coro) -> None:
+        """Run `coro` for `job`; a failure fails the job."""
+
+        async def guarded() -> None:
+            try:
+                await coro
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:  # noqa: BLE001 - shown to the operator
+                if job.state not in FINAL:
+                    self.set(job, "failed", str(e) or type(e).__name__, level="error")
+            finally:
+                if self.tasks.get(job.id) is task:
+                    del self.tasks[job.id]
+
+        task = asyncio.get_running_loop().create_task(guarded())
+        self.tasks[job.id] = task
+
+    def set(self, job: Job, state: str, message: str = "", level: str | None = None) -> None:
+        job.state = state
+        job.message = message
+        if state in FINAL:
+            job.finished = time.time()
+        self.log("job." + state, message or state, level=level or ("warning" if state == "failed" else "info"), job=job)
+        self._next_sync = min(self._next_sync, time.monotonic() + 0.5)  # tell the gateway soon
+        self.save()
+
+    # --- steps -----------------------------------------------------------------
+
+    async def download(self, job: Job) -> None:
+        data = await self.gateway.download(job)
+        self.seq_path(job).write_bytes(data)
+        job.duration = seq_duration(data.decode("utf-8", "replace")) or 0.0
+        self.set(job, "ready", "downloaded ({})".format(size(len(data))))
+
+    def schedule(self) -> None:
+        """Keep `lookahead` jobs dropped but not yet read by the interpreter."""
+        waiting = sum(1 for job in self.jobs.values() if job.on_scanner and not job.read)
+        ready = sorted(
+            (job for job in self.jobs.values() if job.state == "ready"),
+            key=lambda job: (not job.priority, job.created),
+        )
+        for job in ready[: max(0, self.lookahead - waiting)]:
+            self._drops += 1
+            # The name order is the drop order: sync.bat schedules by name
+            stamp = datetime.now().strftime("%y%m%d-%H%M%S")
+            job.file = "mrx_{}-{:02d}_{}.seq".format(stamp, self._drops % 100, job.id)
+            self.share.drop(job.file, self.seq_path(job).read_bytes())
+            job.on_scanner, job.read, job.line, job.day = True, False, 0, ""
+            self.set(job, "scheduled", "dropped into the inbox as " + job.file)
+
+    def observe(self) -> None:
+        """Read `sync.bat`'s status and move the jobs on the scanner along."""
+        status = self.share.read_status()
+        now = time.monotonic()
+        if status is not None:
+            if self._run is not None and status.run != self._run:
+                self.scanner_restarted(status)
+            self._run = status.run
+            if status.beat != self._beat:
+                self._beat, self._beat_seen = status.beat, now
+        alive = status is not None and now - self._beat_seen < SYNC_BAT_TIMEOUT
+        if alive != self.sync_bat_alive:
+            if alive:
+                self.log("sync_bat.online", "sync.bat is running")
+            else:
+                self.log("sync_bat.offline", "sync.bat is not running (no heartbeat in {})".format(self.share.status_dir), level="warning")
+        self.sync_bat_alive = alive
+        self.status = status
+        if status is None:
+            return
+
+        for job in list(self.jobs.values()):
+            if not job.on_scanner:
+                continue
+            found = status.find(job.file)
+            if found is not None:
+                job.line, job.day = found
+            elif not job.read:
+                continue  # still in the inbox, or on its way from there
+            # A job already read is looked for even when its line is gone (a
+            # restarted sync.bat): its .seq.dat still arrives.
+            if not job.read and job.line <= status.position:
+                job.read = True
+                job.measuring_since = time.time()
+                if job.state == "scheduled":
+                    self.set(job, "measuring", "the interpreter read line {}".format(job.line))
+                else:
+                    self.log("job.measured_anyway", "cancelled, but measured anyway: its data will be discarded", job=job)
+            if not job.read:
+                if job.state == "scheduled":
+                    job.message = "in control.txt, line {}".format(job.line)
+                continue
+            if self.share.dat(job.day, job.file).exists():
+                job.on_scanner = False
+                job.measured = time.time()
+                if job.discard:
+                    self.log("job.discarded", "measured, data discarded (the job was cancelled)", job=job)
+                else:
+                    self.spawn(job, self.process(job))
+            elif job.state == "measuring" and self.share.dat_in_transfer(job.day, job.file):
+                job.message = "measured, the .seq.dat is being copied"
+
+    def scanner_restarted(self, status: ScannerStatus) -> None:
+        """`sync.bat` started again with a fresh `control.txt`: what was dropped
+        but not read is no longer scheduled."""
+        self.log("sync_bat.restarted", "sync.bat restarted: control.txt is new", level="warning")
+        for job in self.jobs.values():
+            if job.on_scanner and not job.read and not self.share.in_inbox(job.file) and status.find(job.file) is None:
+                job.on_scanner = False
+                if job.state == "scheduled":
+                    job.priority = True
+                    self.set(job, "ready", "sync.bat restarted before it was measured: scheduled again")
+
+    async def process(self, job: Job) -> None:
+        """Convert the `.seq.dat` and upload the signal."""
+        self.set(job, "converting", "reading " + job.file + ".dat")
+        partial = await asyncio.to_thread(self._convert, job)
+        if job.state != "converting":
+            return  # cancelled meanwhile
+        if partial is not None:
+            k, total = partial
+            job.by = "supervisor"
+            job.reason = job.reason or "aborted on the scanner after {} of {} ADCs".format(k, total)
+            self.set(job, "cancelled", "{} - the partial signal stays at {}".format(job.reason, job.npy))
+            return
+        await self.upload(job)
+
+    def _convert(self, job: Job) -> tuple[int, int] | None:
+        """Write the job's signal next to its `.seq.dat`. Returns `(ADCs
+        measured, ADCs in the sequence)` if the measurement was aborted."""
+        counts = adc_sample_counts(self.seq_path(job).read_text(encoding="utf-8", errors="replace"))
+        dat = self.share.dat(job.day, job.file)
+        samples = read_dat(dat)
+        partial = None
+        if len(samples) != expected_lines(counts, self.coils, self.padding):
+            k = whole_adcs(len(samples), counts, self.coils, self.padding)
+            if k is None:
+                convert(samples, counts, self.coils, self.padding)  # raises with the details
+            partial, counts = (k, len(counts)), counts[:k]
+        signal = convert(samples, counts, self.coils, self.padding)
+        del samples
+        if CONJUGATE:
+            np.conjugate(signal, out=signal)
+        npy = dat.with_name(job.file + ".signal.npy")
+        tmp = npy.with_name(npy.name + ".tmp")
+        with open(tmp, "wb") as f:
+            np.save(f, signal, allow_pickle=False)
+        os.replace(tmp, npy)
+        job.npy, job.shape, job.partial = str(npy), list(signal.shape), partial is not None
+        return partial
+
+    async def upload(self, job: Job) -> None:
+        self.set(job, "uploading", "signal {} x {} coils".format(*job.shape))
+        job.progress, job.rate = 0.0, 0.0
+        started = time.monotonic()
+
+        def progress(done: int, total: int) -> None:
+            job.progress = done / total if total else 1.0
+            job.rate = done / max(time.monotonic() - started, 1e-3)
+
+        await self.gateway.upload(job, Path(job.npy), progress)
+        self.set(job, "done", "signal {} x {} coils uploaded ({}/s)".format(job.shape[0], job.shape[1], size(job.rate)))
+
+    # --- what the operator and the agent can do -------------------------------
+
+    def cancel(self, job: Job, by: str, reason: str = "") -> str:
+        """Cancel `job` as far as it still goes. Returns what that means."""
+        if job.state in FINAL:
+            return "{} is already {}".format(job.name, job.state)
+        task = self.tasks.pop(job.id, None)
+        if task is not None:
+            task.cancel()
+        if job.state == "uploading":
+            self.spawn_quiet(self.gateway.abort_upload(job))
+        note = "cancelled"
+        if job.on_scanner:
+            if not job.read and self.share.withdraw(job.file):
+                job.on_scanner = False
+                note = "cancelled, taken out of the inbox"
+            else:
+                job.discard = True
+                note = "cancelled, but it is on the scanner: it is measured unless stopped there, and the data is discarded"
+        job.by, job.reason = by, reason
+        self.set(job, "cancelled", note + (": " + reason if reason else ""))
+        return note
+
+    def stays_on_scanner(self, job: Job) -> bool:
+        """Whether a cancel would still let the scanner measure `job`."""
+        return job.on_scanner and (job.read or not self.share.in_inbox(job.file))
+
+    def spawn_quiet(self, coro) -> None:
+        async def run() -> None:
+            try:
+                await coro
+            except Exception as e:  # noqa: BLE001
+                self.log("gateway.error", str(e), level="warning")
+
+        asyncio.get_running_loop().create_task(run())
+
+    def can_retry(self, job: Job | None) -> tuple[bool, bool]:
+        """Whether `job` can be uploaded again, and measured again."""
+        if job is None or job.state not in ("cancelled", "failed", "expired"):
+            return False, False
+        has_data = bool(job.npy) and not job.partial and Path(job.npy).exists()
+        return has_data, self.seq_path(job).exists()
+
+    async def retry(self, job: Job, mode: str = "auto", priority: bool = True) -> Job:
+        """A new job for `job`: its signal uploaded again, or measured again."""
+        upload, measure = self.can_retry(job)
+        if mode == "auto":
+            mode = "upload" if upload else "measure"
+        if not (upload if mode == "upload" else measure):
+            raise ScanError("{} cannot be {}".format(job.name, "uploaded again" if mode == "upload" else "measured again"))
+        info = await self.gateway.retry(job, mode)
+        new = self.add(info, retry_of=job.id, priority=priority)
+        shutil.copyfile(self.seq_path(job), self.seq_path(new))
+        new.duration = job.duration
+        self.log("job.retry", "{} again as job {}".format("uploading" if mode == "upload" else "measuring", new.id), job=job)
+        if mode == "upload":
+            new.npy, new.shape, new.file, new.day = job.npy, job.shape, job.file, job.day
+            self.spawn(new, self.upload(new))
+        else:
+            self.set(new, "ready", "restart of " + job.id)
+        return new
+
+    def add_reason(self, job: Job, reason: str) -> None:
+        job.reason = reason
+        self.log("job.reason", reason, job=job)
+        self._next_sync = min(self._next_sync, time.monotonic() + 0.5)
+
+    def seq_path(self, job: Job) -> Path:
+        return self.seq_dir / (job.id + ".seq")
+
+    def folder(self, job: Job) -> Path:
+        return self.share.measurement / job.day if job.day else self.seq_dir
+
+    # --- restart safety ---------------------------------------------------------
+
+    def save(self) -> None:
         try:
-            os.remove(self.path)
+            write_atomic(self.state_file, json.dumps({"jobs": [asdict(job) for job in self.jobs.values()]}).encode())
         except OSError:
             pass
 
-
-# =============================================================================
-# The loop
-# =============================================================================
-# The script holds up to two jobs: the one being measured, and the next one,
-# which is already in the control file so that the interpreter starts it as soon
-# as the measurement before it ends - converting and uploading happen during the
-# next measurement, not between the two. How many it may hold is the gateway's
-# to decide (`MAX_IN_FLIGHT` there): everything else stays in its queue, where
-# it can still be cancelled.
-
-
-class Job:
-    """A job the script has: what the gateway sent, its entry in the state
-    file and where its files are."""
-
-    def __init__(self, job: dict, entry: dict, measurement_dir: str) -> None:
-        self.id = job["id"]
-        self.job = job
-        self.entry = entry
-        self.name = "mrx_{}.seq".format(self.id)
-        self.seq_path = os.path.join(measurement_dir, entry["date"], self.name)
-        self.dat_path = self.seq_path + ".dat"
-        # The converted signal, kept so it survives a failed upload or a restart
-        self.npy_path = self.seq_path + ".signal.npy"
-
-
-class Runner:
-    def __init__(self, args, api: Api, console: Console, skip: SkipReader) -> None:
-        self.args = args
-        self.api = api
-        self.console = console
-        self.say = console.say
-        self.skip = skip
-        # Oldest first; the first is the one being measured
-        self.jobs = []  # type: List[Job]
-        # Why `--simulate` could not write the data, which ends the wait like a skip
-        self.simulate_failed = None  # type: Optional[str]
-        session = hashlib.sha256(api.secret.encode()).hexdigest()[:16]
-        self.state = State(os.path.join(args.measurement_dir, STATE_FILE), session)
-
-    def run(self) -> None:
-        """Poll, finish the oldest job while the next one waits in the control
-        file, repeat - until the session ends."""
-        while True:
-            self.take_more()
-            if not self.jobs:
-                time.sleep(self.args.poll_interval)
-                continue
-            job = self.jobs[0]
-            try:
-                self.finish(job)
-            except JobEnded as e:
-                self.say("job {} was ended by the gateway: {}".format(job.id, e), RED)
-            self.jobs.pop(0)
-            self.state.drop(job.id)
-
-    def report(self, job: dict, state: str, message: str = "") -> None:
-        self.api.report(job["id"], state, message, self.console.take())
-
-    def take_more(self) -> None:
-        """Take every job the gateway hands out beyond the ones the script has:
-        after a restart those it already had, otherwise at most the next one.
-        Every call is also a heartbeat."""
-        while True:
-            have = [j.id for j in self.jobs]
-            job = self.api.next_job(have)
-            # A gateway from before `have` hands out the job in flight again
-            if job is None or job["id"] in have:
-                return
-            try:
-                self.jobs.append(self.start(job))
-            except JobEnded as e:
-                # The .seq could not be downloaded
-                self.say("job {} failed: {}".format(job["id"], e), RED)
-                try:
-                    self.report(job, "failed", str(e))
-                except JobEnded:
-                    pass
-
-    def start(self, job: dict) -> Job:
-        """Write the job's `.seq` and append it to the control file, behind the
-        measurement in progress if there is one."""
-        entry = self.state.load(job["id"])
-        name = "mrx_{}.seq".format(job["id"])
-        if entry:
-            self.say("resuming job {} from {} ({})".format(job["id"], job["login"], name), BOLD, CYAN)
-        else:
-            self.say("job {} from {}: {}".format(job["id"], job["login"], name), BOLD, CYAN)
-            entry = {"date": datetime.now().strftime("%Y%m%d"), "stage": "new"}
-        new = Job(job, entry, self.args.measurement_dir)
-
-        # Restarted in the middle of an upload: the data is already there
-        if job["state"] != "uploading" and entry["stage"] == "new":
-            os.makedirs(os.path.dirname(new.seq_path), exist_ok=True)
-            # Written before its line goes into the control file, so the
-            # interpreter never finds a path that is not complete yet
-            seq, report = self.api.download(job["sequence_url"])
-            write_atomic(new.seq_path, seq)
-            self.say("downloaded {}: {}".format(name, report), DIM)
-            if self.args.control_file is not None:
-                line = scanner_path(self.args.scanner_measurement_dir, entry["date"], name)
-                if append_to_control_file(self.args.control_file, line):
-                    self.say("added to control file: {}".format(line))
-            entry["stage"] = "appended"
-            self.state.save(new.id, entry)
-        if self.jobs:
-            self.say("{} is measured next, after {}".format(name, self.jobs[-1].name))
-        return new
-
-    def finish(self, job: Job) -> None:
-        """Wait for the job's data and upload it."""
-        if job.job["state"] == "uploading":
-            if not os.path.exists(job.dat_path) and npy_shape(job.npy_path) is None:
-                self.report(job.job, "failed", "the script restarted and {} is gone".format(job.dat_path))
-                return
-        else:
-            # The interpreter is on it now: the one before it is done
-            self.report(job.job, "measuring")
-            self.simulate_failed = None
-            if self.args.simulate and not os.path.exists(job.dat_path):
-                threading.Thread(target=self.simulate, args=(job,), daemon=True).start()
-
-            self.say("waiting for {} (type s + Enter to skip)".format(os.path.basename(job.dat_path)))
-            try:
-                self.wait_for(job)
-            except Skipped as e:
-                self.say("job {} failed: {}".format(job.id, e), RED)
-                self.report(job.job, "failed", str(e))
-                return
-            # Counted from when the job's turn came, so it includes the
-            # interpreter starting up and the file settling
-            self.say(
-                "{} complete ({}) after {} of measuring".format(
-                    os.path.basename(job.dat_path),
-                    size(os.path.getsize(job.dat_path)),
-                    duration(time.time() - job.entry["measuring_since"]),
-                ),
-                DIM,
-            )
-
-        self.in_background(self.upload, job)
-
-    def wait_for(self, job: Job) -> None:
-        self.skip.requested.clear()
-        started = job.entry.setdefault("measuring_since", time.time())
-        self.state.save(job.id, job.entry)
-        last_beat = [time.monotonic()]
-
-        def check() -> None:
-            if self.skip.requested.is_set():
-                raise Skipped("skipped by operator")
-            if self.simulate_failed:
-                raise Skipped(self.simulate_failed)
-            if self.args.timeout and time.time() - started > self.args.timeout * 60:
-                raise Skipped("no data after {:g} minutes (--timeout)".format(self.args.timeout))
-            # Measuring can take long, and the gateway counts a silent scanner
-            # as offline after 30 s. The report also hears of a job the
-            # gateway ended, and the poll takes the next job once there is one.
-            if time.monotonic() - last_beat[0] >= self.args.poll_interval:
-                self.report(job.job, "measuring")
-                self.take_more()
-                last_beat[0] = time.monotonic()
-
-        wait_until_stable(job.dat_path, check)
-
-    def in_background(self, work: Callable, *args) -> None:
-        """Run `work` on a thread of its own and keep polling meanwhile: reading
-        a large `.seq.dat` and uploading can take longer than the gateway waits
-        for a sign of life, and a job that comes in meanwhile is appended
-        without waiting for the upload."""
-        errors = []  # type: List[BaseException]
-
-        def target() -> None:
-            try:
-                work(*args)
-            except BaseException as e:
-                errors.append(e)
-
-        thread = threading.Thread(target=target, daemon=True)
-        thread.start()
-        while True:
-            thread.join(self.args.poll_interval)
-            if not thread.is_alive():
-                break
-            self.take_more()
-        if errors:
-            raise errors[0]
-
-    def upload(self, job: Job) -> None:
-        """Convert the `.seq.dat`, save the signal next to it and upload it.
-        The `.seq.dat` itself is not uploaded - it is several times larger - and
-        stays where it is, as does the saved signal: if the upload fails, it can
-        be copied off the PC some other way. A script restarted in the middle of
-        an upload takes the saved signal rather than converting again."""
-        npy_name = os.path.basename(job.npy_path)
-        shape = npy_shape(job.npy_path) if job.job["state"] == "uploading" else None
-        if shape is not None:
-            with open(job.npy_path, "rb") as f:
-                data = f.read()
-            self.say("reusing {} ({}) from before the restart".format(npy_name, size(len(data))), DIM)
-        else:
-            converted = self.convert_dat(job)
-            if converted is None:
-                return
-            shape, data = converted
-            try:
-                write_atomic(job.npy_path, data)
-                self.say("saved signal.npy as {}".format(job.npy_path), DIM)
-            except OSError as e:
-                # Not worth losing the upload over
-                self.say("could not save signal.npy as {}: {}".format(job.npy_path, e), YELLOW)
-
-        if job.job["state"] != "uploading":
-            self.report(job.job, "uploading")
-        self.say("uploading signal.npy ({})".format(size(len(data))), DIM)
+    def load(self) -> None:
         try:
-            report = self.api.upload(job.id, "signal.npy", data, {"X-Signal-Shape": "{},{}".format(*shape)})
-        except (JobEnded, SessionEnded):
-            if os.path.exists(job.npy_path):
-                self.say("signal.npy was not uploaded, it is kept at {}".format(job.npy_path), YELLOW)
-            raise
-        self.say("uploaded signal.npy: {}".format(report), DIM)
-        # The gateway has the signal now, so the job is done there. This line
-        # reaches the gateway's log with the next report.
-        self.say("job {} done: signal {} x {} coils uploaded".format(job.id, *shape), GREEN)
-
-    def convert_dat(self, job: Job) -> Optional[Tuple[Tuple[int, int], bytes]]:
-        """The job's `.seq.dat` as `(shape, .npy contents)` of the signal, or
-        None if it could not be converted (the job is failed then)."""
-        dat_name = os.path.basename(job.dat_path)
-        try:
-            with open(job.seq_path, "r", encoding="utf-8") as f:
-                counts = adc_sample_counts(f.read())
-            self.say("parsing {} ({})".format(dat_name, size(os.path.getsize(job.dat_path))), DIM)
-            t = time.monotonic()
-            with open(job.dat_path, "r", encoding="ascii") as f:
-                samples = read_dat(f)
-            self.say("parsed {} lines in {}, converting".format(len(samples), took(t)), DIM)
-            t = time.monotonic()
-            signal = convert(samples, counts, self.args.coils, self.args.adc_padding)
-            del samples
-            if CONJUGATE:
-                np.conjugate(signal, out=signal)
-            self.say(
-                "converted to {} x {} coils ({} ADCs{}) in {}".format(
-                    signal.shape[0], signal.shape[1], len(counts), ", conjugated" if CONJUGATE else "", took(t)
-                ),
-                DIM,
-            )
-        except (ValueError, UnicodeDecodeError) as e:
-            # Whoever looks into it needs the raw file, which only the site has
-            message = "{} - the raw data stays at the site, in {}".format(e, job.dat_path)
-            self.say("job {} failed: {}".format(job.id, message), RED)
-            self.report(job.job, "failed", message)
-            return None
-
-        shape = signal.shape
-        data = npy_bytes(signal)
-        del signal
-        return shape, data
-
-    def simulate(self, job: Job) -> None:
-        """Play the interpreter: wait a bit, check that the job is in the
-        control file (if there is one), and write noise in its layout where the
-        real data would go. The script only calls this for the job whose turn
-        it is, as the interpreter measures one after the other."""
-        time.sleep(self.args.simulate_delay)
-        if self.args.control_file is not None:
-            line = scanner_path(self.args.scanner_measurement_dir, job.entry["date"], job.name)
-            with open(self.args.control_file, "r") as f:
-                lines = [l.strip() for l in f]
-            if line not in lines:
-                self.say("simulate: this job is not in the control file, writing nothing", YELLOW)
-                return
-        try:
-            with open(job.seq_path, "r", encoding="utf-8") as f:
-                counts = adc_sample_counts(f.read())
-        except (ValueError, UnicodeDecodeError) as e:
-            # What the interpreter would choke on too
-            self.simulate_failed = "simulate: cannot read {}: {}".format(job.name, e)
+            data = json.loads(self.state_file.read_text())
+        except (OSError, ValueError):
             return
-        write_atomic(job.dat_path, fake_dat(counts, self.args.coils, self.args.adc_padding).encode())
-        self.say("simulate: wrote {}".format(os.path.basename(job.dat_path)), DIM)
+        known = {f.name for f in fields(Job)}
+        for entry in data.get("jobs", []):
+            job = Job(**{k: v for k, v in entry.items() if k in known})
+            self.jobs[job.id] = job
+
+    def resume(self) -> None:
+        """Carry on with what a previous run left unfinished. Needs the loop."""
+        for job in self.jobs.values():
+            if job.state == "downloading" or (job.state == "ready" and not self.seq_path(job).exists()):
+                self.spawn(job, self.download(job))
+            elif job.state == "converting":
+                self.spawn(job, self.process(job))
+            elif job.state == "uploading":
+                self.spawn(job, self.upload(job))
 
 
 # =============================================================================
-# Settings
+# The TUI
 # =============================================================================
 
+STATE_STYLE = {
+    "downloading": "dim",
+    "ready": "",
+    "scheduled": "blue",
+    "measuring": "bold yellow",
+    "converting": "magenta",
+    "uploading": "cyan",
+    "done": "green",
+    "cancelled": "dark_orange",
+    "failed": "bold red",
+    "expired": "dim",
+}
+LEVEL_STYLE = {"info": "", "warning": "yellow", "error": "bold red"}
 
-def ask(prompt: str, default) -> str:
-    """One setting typed in, the default when Enter is pressed."""
-    shown = " [{}]".format(default) if default not in (None, "") else ""
-    while True:
+
+class ReasonScreen(ModalScreen[str | None]):
+    """Asks for a reason. Enter or OK returns it (maybe empty), Escape None."""
+
+    BINDINGS = [Binding("escape", "back", "Back")]
+
+    def __init__(self, title: str, value: str = "") -> None:
+        super().__init__()
+        self.title_text = title
+        self.value = value
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Label(self.title_text)
+            yield Input(value=self.value, placeholder="reason (optional)", id="reason-input")
+            with Horizontal(id="dialog-buttons"):
+                yield Button("OK", variant="primary", id="ok")
+                yield Button("Back", id="back")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.dismiss(self.query_one(Input).value if event.button.id == "ok" else None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value)
+
+    def action_back(self) -> None:
+        self.dismiss(None)
+
+
+class ScannerApp(App):
+    TITLE = "mrx scanner"
+    CSS = """
+    #info { height: auto; padding: 0 1; background: $boost; }
+    #main { height: 1fr; }
+    #jobs { width: 3fr; border: round $primary; }
+    #side { width: 2fr; }
+    #activity { height: 1fr; border: round $secondary; padding: 0 1; }
+    #details { height: auto; border: round $secondary; padding: 0 1; }
+    #actions { height: auto; margin-top: 1; }
+    #actions Button { margin-right: 1; min-width: 8; }
+    #log { height: 10; border: round $secondary; }
+    ReasonScreen { align: center middle; }
+    #dialog { width: 70; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
+    #dialog-buttons { height: auto; margin-top: 1; }
+    """
+    BINDINGS = [
+        Binding("c", "cancel", "Cancel"),
+        Binding("u", "retry('upload')", "Retry upload"),
+        Binding("m", "retry('measure')", "Re-measure"),
+        Binding("r", "reason", "Reason"),
+        Binding("o", "open_folder", "Folder"),
+        Binding("f", "toggle_finished", "Hide finished"),
+        Binding("t", "copy_token", "Copy token"),
+        Binding("a", "sim_abort", "Sim: abort"),
+        Binding("s", "sim_restart", "Sim: restart sync.bat"),
+        Binding("n", "demo_job", "Demo: new job"),
+        Binding("q", "quit", "Quit"),
+    ]
+
+    def __init__(self, engine: Engine, settings: dict) -> None:
+        super().__init__()
+        self.engine = engine
+        self.settings = settings
+        self.selected: str | None = None
+        self.hide_finished = False
+        self._rows: set[str] = set()
+
+    def compose(self) -> ComposeResult:
+        yield Static(id="info")
+        with Horizontal(id="main"):
+            yield DataTable(id="jobs", cursor_type="row", zebra_stripes=True)
+            with Vertical(id="side"):
+                yield Static(id="activity")
+                with Vertical(id="details"):
+                    yield Static(id="detail")
+                    with Horizontal(id="actions"):
+                        yield Button("Cancel", id="cancel", variant="error")
+                        yield Button("Retry upload", id="retry-upload")
+                        yield Button("Re-measure", id="retry-measure")
+                        yield Button("Reason", id="reason")
+                        yield Button("Folder", id="open-folder")
+        yield RichLog(id="log", markup=False, wrap=True)
+        yield Footer()
+
+    def on_mount(self) -> None:
+        table = self.query_one("#jobs", DataTable)
+        table.border_title = "Jobs"
+        for label, key in (("created", "created"), ("from", "from"), ("name", "name"), ("state", "state"), ("", "message")):
+            table.add_column(label, key=key)
+        self.query_one("#activity").border_title = "Activity"
+        self.query_one("#details").border_title = "Details"
+        self.query_one("#log").border_title = "Log"
+        self.engine.log.listeners.append(self.on_log)
+        self.engine.resume()
+        self.set_interval(0.5, self.tick)
+        self.refresh_views()
+
+    async def tick(self) -> None:
+        await self.engine.tick()
+        self.refresh_views()
+
+    def on_log(self, record: dict) -> None:
+        line = Text(record["ts"][11:19] + " ", style="dim")
+        if record.get("name"):
+            line.append(record["name"] + " ", style="bold")
+        line.append(record["message"], style=LEVEL_STYLE.get(record["level"], ""))
+        self.query_one("#log", RichLog).write(line)
+
+    # --- views -----------------------------------------------------------------
+
+    def job(self) -> Job | None:
+        return self.engine.jobs.get(self.selected) if self.selected else None
+
+    def refresh_views(self) -> None:
+        self.refresh_info()
+        self.refresh_table()
+        self.refresh_activity()
+        self.refresh_details()
+        self.refresh_bindings()
+
+    def refresh_info(self) -> None:
+        e, s = self.engine, self.settings
+        info = Text()
+        info.append(" {} ".format(s["mode"]), style="bold reverse " + ("green" if s["mode"] == "LIVE" else "yellow"))
+        info.append("  {} · gateway ".format(OPERATOR if not OPERATOR.startswith("__") else "no session"))
+        info.append(*{True: ("online", "green"), False: ("offline", "bold red"), None: ("…", "dim")}[e.gateway_online])
+        info.append(" · sync.bat ")
+        info.append(*(("running", "green") if e.sync_bat_alive else ("not running", "bold red")))
+        info.append(" · {} · {} coils, padding {} · lookahead {} · v{}".format(s["share"], e.coils, e.padding, e.lookahead, VERSION))
+        if e.latest_version != VERSION:
+            info.append("  new script version {}: download it again".format(e.latest_version), style="bold yellow")
+        info.append("\nscan token ")
+        info.append(SCAN_TOKEN, style="bold cyan")
+        info.append("  (t copies it)", style="dim")
+        self.query_one("#info", Static).update(info)
+
+    def visible(self) -> list[Job]:
+        jobs = sorted(self.engine.jobs.values(), key=lambda job: job.created)
+        if self.hide_finished:
+            jobs = [job for job in jobs if job.state not in FINAL or job.on_scanner]
+        return jobs
+
+    def refresh_table(self) -> None:
+        table = self.query_one("#jobs", DataTable)
+        jobs = self.visible()
+        keys = {job.id for job in jobs}
+        for key in self._rows - keys:
+            table.remove_row(key)
+        self._rows &= keys
+        for job in jobs:
+            state = Text(job.state, style=STATE_STYLE.get(job.state, ""))
+            if job.state == "cancelled" and job.on_scanner:
+                state.append(" (on scanner)", style="dim")
+            message = Text(job.message[:60], style="dim")
+            if job.id not in self._rows:
+                created = datetime.fromtimestamp(job.created).strftime("%H:%M:%S")
+                table.add_row(created, job.login, job.name, state, message, key=job.id)
+                self._rows.add(job.id)
+            else:
+                table.update_cell(job.id, "state", state, update_width=True)
+                table.update_cell(job.id, "message", message, update_width=True)
+        if self.selected not in keys:
+            self.selected = jobs[0].id if jobs else None
+
+    def refresh_activity(self) -> None:
+        grid = Table.grid(padding=(0, 1), expand=True)
+        grid.add_column(width=11)
+        grid.add_column(ratio=1)
+        grid.add_column(width=18, justify="right")
+        now = time.time()
+        rows = 0
+        for job in sorted(self.engine.jobs.values(), key=lambda job: job.created):
+            if job.state == "downloading":
+                grid.add_row(Text("download", style="dim"), job.name, "")
+            elif job.state == "measuring":
+                elapsed = now - job.measuring_since
+                timing = "{} / ~{}".format(clock(elapsed), clock(job.duration)) if job.duration else clock(elapsed)
+                grid.add_row(Text("measuring", style="bold yellow"), job.name, timing)
+                if job.duration:
+                    grid.add_row("", ProgressBar(total=job.duration, completed=min(elapsed, job.duration)), "")
+            elif job.state == "converting":
+                grid.add_row(Text("converting", style="magenta"), job.name, "")
+            elif job.state == "uploading":
+                grid.add_row(Text("uploading", style="cyan"), job.name, "{:3.0f}%  {}/s".format(job.progress * 100, size(job.rate)))
+                grid.add_row("", ProgressBar(total=1.0, completed=job.progress), "")
+            else:
+                continue
+            rows += 1
+        ready = sum(1 for job in self.engine.jobs.values() if job.state == "ready")
+        if ready:
+            grid.add_row(Text("waiting", style="dim"), "{} job{} ready".format(ready, "s" if ready > 1 else ""), "")
+            rows += 1
+        self.query_one("#activity", Static).update(grid if rows else Text("idle", style="dim"))
+
+    def refresh_details(self) -> None:
+        job = self.job()
+        detail = self.query_one("#detail", Static)
+        if job is None:
+            detail.update(Text("no job selected", style="dim"))
+        else:
+            text = Text()
+            text.append(job.name, style="bold")
+            text.append("  job {} · from {}\n".format(job.id, job.login))
+            text.append(job.state, style=STATE_STYLE.get(job.state, ""))
+            if job.by:
+                text.append(" by " + job.by)
+            if job.message:
+                text.append(" - " + job.message)
+            text.append("\n")
+            if job.reason:
+                text.append("reason: {}\n".format(job.reason))
+            if job.retry_of:
+                text.append("restart of job {}\n".format(job.retry_of))
+            if job.file:
+                text.append("file: {}{}\n".format(job.file, ", line {}".format(job.line) if job.line else ""), style="dim")
+            if job.shape:
+                text.append("signal: {} x {} coils{}\n".format(job.shape[0], job.shape[1], " (partial)" if job.partial else ""), style="dim")
+            if job.duration:
+                text.append("expected duration: {}\n".format(clock(job.duration)), style="dim")
+            detail.update(text)
+        upload, measure = self.engine.can_retry(job)
+        self.query_one("#cancel", Button).disabled = job is None or job.state in FINAL
+        self.query_one("#retry-upload", Button).disabled = not upload
+        self.query_one("#retry-measure", Button).disabled = not measure
+        self.query_one("#reason", Button).disabled = job is None or job.state not in ("cancelled", "failed")
+        self.query_one("#open-folder", Button).disabled = job is None
+
+    def check_action(self, action: str, parameters: tuple) -> bool | None:
+        if action in ("sim_abort", "sim_restart"):
+            return self.engine.scanner is not None
+        if action == "demo_job":
+            return isinstance(self.engine.gateway, DemoGateway)
+        job = self.job()
+        if action == "cancel":
+            return None if job is None or job.state in FINAL else True
+        if action == "retry":
+            upload, measure = self.engine.can_retry(job)
+            return True if (upload if parameters and parameters[0] == "upload" else measure) else None
+        if action == "reason":
+            return True if job is not None and job.state in ("cancelled", "failed") else None
+        return True
+
+    # --- events and actions ----------------------------------------------------
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        if event.row_key is not None and event.row_key.value is not None:
+            self.selected = event.row_key.value
+            self.refresh_details()
+            self.refresh_bindings()
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        action = {
+            "cancel": "cancel",
+            "retry-upload": "retry('upload')",
+            "retry-measure": "retry('measure')",
+            "reason": "reason",
+            "open-folder": "open_folder",
+        }.get(event.button.id or "")
+        if action:
+            await self.run_action(action)
+
+    def action_cancel(self) -> None:
+        job = self.job()
+        if job is None or job.state in FINAL:
+            return
+        title = "Cancel {} (job {})?".format(job.name, job.id)
+        if self.engine.stays_on_scanner(job):
+            title += "\nIt is already on the scanner: it is still measured unless you stop it there."
+
+        def done(reason: str | None) -> None:
+            if reason is not None:
+                note = self.engine.cancel(job, "operator", reason)
+                self.notify(note, severity="warning" if "on the scanner" in note else "information")
+                self.refresh_views()
+
+        self.push_screen(ReasonScreen(title), done)
+
+    async def action_retry(self, mode: str) -> None:
+        job = self.job()
+        if job is None:
+            return
         try:
-            answer = input("{}{}: ".format(prompt, shown)).strip()
-        except EOFError:
-            answer = ""
-        if answer:
-            return answer
-        if default not in (None, ""):
-            return str(default)
-        print("  this one has no default, please enter a value")
+            new = await self.engine.retry(job, mode, priority=True)
+        except Exception as e:  # noqa: BLE001 - shown to the operator
+            self.notify(str(e), severity="error")
+            return
+        self.selected = new.id
+        self.refresh_views()
+
+    def action_reason(self) -> None:
+        job = self.job()
+        if job is None or job.state not in ("cancelled", "failed"):
+            return
+
+        def done(reason: str | None) -> None:
+            if reason:
+                self.engine.add_reason(job, reason)
+                self.refresh_views()
+
+        self.push_screen(ReasonScreen("Reason for {} (job {})".format(job.name, job.id), job.reason), done)
+
+    def action_open_folder(self) -> None:
+        job = self.job()
+        if job is None:
+            return
+        folder = self.engine.folder(job)
+        try:
+            if sys.platform == "win32":
+                os.startfile(folder)  # noqa: S606 - opens Explorer
+            else:
+                subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(folder)])
+        except OSError as e:
+            self.notify("cannot open {}: {}".format(folder, e), severity="error")
+
+    def action_toggle_finished(self) -> None:
+        self.hide_finished = not self.hide_finished
+        self.refresh_views()
+
+    def action_copy_token(self) -> None:
+        self.copy_to_clipboard(SCAN_TOKEN)
+        self.notify("scan token copied")
+
+    def action_sim_abort(self) -> None:
+        if self.engine.scanner is not None and self.engine.scanner.abort():
+            self.notify("simulated: the supervisor stopped the measurement")
+
+    def action_sim_restart(self) -> None:
+        if self.engine.scanner is not None:
+            self.engine.scanner.restart()
+            self.notify("simulated: sync.bat restarted")
+
+    def action_demo_job(self) -> None:
+        if isinstance(self.engine.gateway, DemoGateway):
+            self.engine.gateway.first += 1
+            self.engine._next_sync = 0
 
 
-def settings(argv: Optional[List[str]] = None):
-    parser = argparse.ArgumentParser(
-        description="Connects this scanner to the MRX gateway: measures the sequences sent to it and uploads the data."
-    )
-    parser.add_argument("--measurement-dir", help="measurement folder, as this PC sees it")
-    parser.add_argument("--scanner-measurement-dir", help="the same folder, as the scanner sees it")
-    parser.add_argument("--control-file", help="the Pulseq interpreter's control file")
-    parser.add_argument("--coils", type=int, help="receive coils in the .seq.dat")
-    parser.add_argument("--adc-padding", type=int, help="extra samples per coil readout")
-    parser.add_argument("--timeout", type=float, default=None, help="give up on a job after this many minutes (default: off)")
-    parser.add_argument("--simulate", action="store_true", help="also play the interpreter, writing noise as the data")
-    parser.add_argument("--simulate-delay", type=float, default=3.0, help=argparse.SUPPRESS)
-    parser.add_argument("--poll-interval", type=float, default=POLL_INTERVAL, help=argparse.SUPPRESS)
+# =============================================================================
+# Main
+# =============================================================================
+
+
+def settings(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Measures the sequences queued on this scanner session.")
+    parser.add_argument("--share", help="the scanner share as this PC sees it (default {})".format(DEFAULT_SHARE))
+    parser.add_argument("--coils", type=int, default=DEFAULT_COILS, help="receive coils (default %(default)s)")
+    parser.add_argument("--adc-padding", type=int, default=DEFAULT_ADC_PADDING, help="extra samples per coil readout (default %(default)s)")
+    parser.add_argument("--lookahead", type=int, default=1, help="jobs kept scheduled behind the measurement in progress (default %(default)s)")
+    parser.add_argument("--workdir", help="where downloaded sequences and the state file go (default: next to this script)")
+    parser.add_argument("--simulate", action="store_true", help="no scanner: play sync.bat and the scanner on a local folder, the data is noise")
+    parser.add_argument("--demo", action="store_true", help="no gateway either: made-up jobs (implies --simulate)")
+    parser.add_argument("--sim-duration", type=float, help="seconds every simulated measurement takes (default: the sequence's TotalDuration)")
     args = parser.parse_args(argv)
-
-    # Asked for only when not given, so for this site Enter is the usual answer
-    if args.measurement_dir is None:
-        if args.simulate:
-            # Simulated data does not belong with the real measurements
-            default = os.path.join(tempfile.gettempdir(), "mrx_scanner_simulate")
-            args.measurement_dir = ask("Measurement folder (this PC)", default)
-            if args.measurement_dir == default:
-                os.makedirs(default, exist_ok=True)
-        else:
-            args.measurement_dir = ask("Measurement folder (this PC)", DEFAULT_MEASUREMENT_DIR)
-    if args.scanner_measurement_dir is None:
-        if args.simulate:
-            # When simulating, this PC is the scanner too
-            args.scanner_measurement_dir = args.measurement_dir
-        else:
-            args.scanner_measurement_dir = ask("Measurement folder (as the scanner sees it)", DEFAULT_SCANNER_MEASUREMENT_DIR)
-    # When simulating, no interpreter reads a control file, so it is only used
-    # when given
-    if args.control_file is None and not args.simulate:
-        args.control_file = ask("Control file", DEFAULT_CONTROL_FILE)
-    if args.coils is None:
-        args.coils = int(ask("Receive coils", DEFAULT_COILS))
-    if args.adc_padding is None:
-        args.adc_padding = int(ask("Extra samples per coil readout", DEFAULT_ADC_PADDING))
-
-    problems = []
-    if not os.path.isdir(args.measurement_dir):
-        problems.append("measurement folder does not exist: " + args.measurement_dir)
-    elif not os.access(args.measurement_dir, os.W_OK):
-        problems.append("measurement folder is not writable: " + args.measurement_dir)
-    if args.control_file is not None:
-        if not os.path.isfile(args.control_file):
-            problems.append("control file does not exist: " + args.control_file)
-        elif not os.access(args.control_file, os.W_OK):
-            problems.append("control file is not writable: " + args.control_file)
-    if args.coils < 1 or args.adc_padding < 0:
-        problems.append("--coils must be at least 1 and --adc-padding not negative")
-    if problems:
-        parser.error("; ".join(problems))
+    if args.demo:
+        args.simulate = True
     return args
 
 
-def command_line(args) -> str:
-    def quote(value) -> str:
-        value = str(value)
-        return '"{}"'.format(value) if " " in value else value
-
-    parts = [
-        "python", quote(os.path.basename(sys.argv[0]) or "mrx_scanner.py"),
-        "--measurement-dir", quote(args.measurement_dir),
-        "--scanner-measurement-dir", quote(args.scanner_measurement_dir),
-    ]
-    if args.control_file is not None:
-        parts += ["--control-file", quote(args.control_file)]
-    parts += [
-        "--coils", str(args.coils),
-        "--adc-padding", str(args.adc_padding),
-    ]
-    if args.timeout:
-        parts += ["--timeout", "{:g}".format(args.timeout)]
-    if args.simulate:
-        parts.append("--simulate")
-    return " ".join(parts)
-
-
-def main(argv: Optional[List[str]] = None) -> int:
-    if not RUNNER_SECRET.startswith("scr_"):
-        print("This is the template. Download your own script at https://mrx-org.github.io/scanner/.")
+def main(argv: list[str] | None = None) -> int:
+    args = settings(argv)
+    if not args.demo and not RUNNER_SECRET.startswith("scr_"):
+        print("This is the template. Download your own script at https://anyfield.net/scanner/ - or try it with --demo.")
+        return 2
+    if not args.demo:
+        print("This version needs the gateway's new sync API, which is not deployed yet. Try it with --demo.")
         return 2
 
-    args = settings(argv)
-    console = Console()
-    paint = console.paint
-    print("\nNext time, the same settings are:\n  {}\n".format(paint(command_line(args), DIM)))
-    print("MRX scanner session of {} at {}".format(paint(OPERATOR, BOLD), BASE_URL))
-    print("Scan token (give it to who may measure here): {}".format(paint(SCAN_TOKEN, BOLD, CYAN)))
-    print("Proxies: {}".format(proxies()))
-    if CONJUGATE:
-        print("Signal is complex conjugated before upload\n")
-    else:
-        print(paint("Signal is NOT complex conjugated before upload", YELLOW) + "\n")
-    if numpy_too_old_for_fast_loadtxt():
-        # `np.loadtxt` only has a fast parser (in C) since 1.23; before that it
-        # is pure Python, slow and several times as hungry for memory
-        bar = "!" * 72
-        lines = [
-            bar,
-            "WARNING: numpy {} is old (older than 1.23)".format(np.__version__),
-            "Reading back large signals (.seq.dat) may be very slow and use a lot",
-            "of memory. Update numpy to 1.23 or newer if you can.",
-            bar,
-        ]
-        print("\n".join(paint(line, BOLD, RED) for line in lines) + "\n")
-    if args.simulate:
-        print(paint("SIMULATING: no scanner is used, the data is noise", BOLD, YELLOW) + "\n")
-
-    api = Api(BASE_URL, RUNNER_SECRET, console.say)
-    runner = Runner(args, api, console, SkipReader().start())
-    console.say("waiting for sequences")
-    try:
-        runner.run()
-    except SessionEnded as e:
-        console.say(str(e) or "session expired - get a new script at {}/scanner/new".format(BASE_URL), RED)
+    workdir = Path(args.workdir) if args.workdir else SCRIPT_DIR / "mrx_scanner_data"
+    if args.demo:
+        workdir = workdir / "demo"
+        shutil.rmtree(workdir, ignore_errors=True)  # every demo starts empty
+    workdir.mkdir(parents=True, exist_ok=True)
+    share = Share(Path(args.share) if args.share else (workdir / "share" if args.simulate else Path(DEFAULT_SHARE)))
+    scanner = SimulatedScanner(share, args.coils, args.adc_padding, args.sim_duration) if args.simulate else None
+    problems = share.check()
+    if problems:
+        print("\n".join(problems))
         return 1
-    except KeyboardInterrupt:
-        console.say("stopped", YELLOW)
+
+    log = EventLog(workdir if args.demo else SCRIPT_DIR)
+    gateway = DemoGateway()
+    engine = Engine(gateway, share, workdir, log, args.coils, args.adc_padding, args.lookahead, scanner)
+    mode = "DEMO" if args.demo else "SIMULATION" if args.simulate else "LIVE"
+    log("script.start", "started ({}), share {}".format(mode.lower(), share.root), version=VERSION)
+    ScannerApp(engine, {"mode": mode, "share": str(share.root)}).run()
+    log("script.stop", "stopped")
     return 0
 
 
