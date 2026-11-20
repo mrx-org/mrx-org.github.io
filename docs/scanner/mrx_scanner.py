@@ -35,6 +35,7 @@ import os
 import random
 import secrets
 import shutil
+import subprocess
 import sys
 import time
 import warnings
@@ -68,7 +69,10 @@ CONJUGATE = "__MRX_CONJUGATE__" != "no"
 VERSION = "2.0.0-dev"
 
 # The defaults for the site this was built for; every one can be overridden
-DEFAULT_SHARE = r"W:\neuroradiologie\zaiss-mrx"
+# The share is remembered per user in this environment variable: `--share`
+# stores it, and the next start uses it. Without one, a generic drive letter.
+SHARE_ENV = "MRX_SHARE"
+GENERIC_SHARE = "V:\\"
 DEFAULT_COILS = 20
 DEFAULT_ADC_PADDING = 4
 
@@ -1369,9 +1373,42 @@ class ScannerApp(App):
 # =============================================================================
 
 
+def remembered(name: str) -> str | None:
+    """A user environment variable. On Windows also read from the registry, so
+    a value stored by an earlier run counts even in a console opened before."""
+    value = os.environ.get(name)
+    if value:
+        return value
+    if sys.platform == "win32":
+        try:
+            import winreg
+
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+                return str(winreg.QueryValueEx(key, name)[0]) or None
+        except OSError:
+            return None
+    return None
+
+
+def remember(name: str, value: str) -> None:
+    """Store `value` as a user environment variable (Windows: `setx`) for the
+    next start. Failing to store it does not stop the script."""
+    if remembered(name) == value:
+        return
+    os.environ[name] = value
+    if sys.platform == "win32":
+        try:
+            subprocess.run(["setx", name, value], check=True, capture_output=True)
+        except (OSError, subprocess.CalledProcessError):
+            pass
+
+
 def settings(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Measures the sequences queued on this scanner session.")
-    parser.add_argument("--share", help="the scanner share as this PC sees it (default {})".format(DEFAULT_SHARE))
+    parser.add_argument(
+        "--share",
+        help="the scanner share as this PC sees it (default: the last one used, kept in %{}%, else {})".format(SHARE_ENV, GENERIC_SHARE),
+    )
     parser.add_argument("--coils", type=int, default=DEFAULT_COILS, help="receive coils (default %(default)s)")
     parser.add_argument("--adc-padding", type=int, default=DEFAULT_ADC_PADDING, help="extra samples per coil readout (default %(default)s)")
     parser.add_argument("--lookahead", type=int, default=1, help="jobs kept scheduled behind the measurement in progress (default %(default)s)")
@@ -1396,12 +1433,22 @@ def main(argv: list[str] | None = None) -> int:
         workdir = workdir / "demo"
         shutil.rmtree(workdir, ignore_errors=True)  # every demo starts empty
     workdir.mkdir(parents=True, exist_ok=True)
-    share = Share(Path(args.share) if args.share else (workdir / "share" if args.simulate else Path(DEFAULT_SHARE)))
+    if args.share:
+        share_root = Path(args.share)
+    elif args.simulate:
+        share_root = workdir / "share"
+    else:
+        share_root = Path(remembered(SHARE_ENV) or GENERIC_SHARE)
+    share = Share(share_root)
     scanner = SimulatedScanner(share, args.coils, args.adc_padding, args.sim_duration) if args.simulate else None
     problems = share.check()
     if problems:
         print("\n".join(problems))
+        if not args.share and not args.simulate:
+            print("Give the share with --share; it is remembered for the next start.")
         return 1
+    if not args.simulate:
+        remember(SHARE_ENV, str(share.root))
 
     log = EventLog(workdir if args.demo else SCRIPT_DIR)
     gateway = DemoGateway() if args.demo else HttpGateway(BASE_URL, RUNNER_SECRET)

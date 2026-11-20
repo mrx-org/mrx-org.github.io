@@ -204,7 +204,7 @@ async function create() {
     `<p><b>${text(s.file_name)}</b> was downloaded. Start <code>sync.bat</code> on the
      scanner PC, then the Pulseq interpreter, then this on the bridge PC:</p>
      <pre>uv run ${text(s.file_name)}</pre>
-     <p class="muted">Options: <code>--share</code> (default <code>W:\\neuroradiologie\\zaiss-mrx</code>),
+     <p class="muted">Options: <code>--share</code> (the share as the bridge PC sees it; remembered for the next start),
      <code>--coils</code> (20), <code>--adc-padding</code> (4), <code>--lookahead</code> (1).
      <code>uv run ${text(s.file_name)} --demo</code> tries it without a scanner.</p>
      <p><b>Scan token</b> - give it to whoever may measure on this scanner:</p>

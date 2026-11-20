@@ -15,17 +15,40 @@
 :: Start this BEFORE the Pulseq interpreter (or while it is stopped): it archives
 :: control.txt and starts a fresh one with position 0.
 :: Stop with CTRL+C.
+::
+:: Usage: sync.bat [share] [pulseq folder]
+::   share         : the share as the scanner PC sees it        (generic default V:)
+::   pulseq folder : the interpreter's folder, with seq-files\measurement and
+::                   control below it  (generic default: the Siemens CustomerSeq\pulseq)
+:: What is given is remembered in the user environment variables MRX_SYNC_SHARE
+:: and MRX_SYNC_PULSEQ and used on the next start. Order: argument, variable,
+:: generic default.
 
 setlocal EnableExtensions DisableDelayedExpansion
 title mrx sync
 
 :: --- Paths ------------------------------------------------------------------
 set "SHARE=V:"
+if defined MRX_SYNC_SHARE set "SHARE=%MRX_SYNC_SHARE%"
+if not "%~1"=="" set "SHARE=%~1"
+if "%SHARE:~-1%"=="\" set "SHARE=%SHARE:~0,-1%"
+set "PULSEQ=C:\ProgramData\Siemens\Numaris\MriCustomer\CustomerSeq\pulseq"
+if defined MRX_SYNC_PULSEQ set "PULSEQ=%MRX_SYNC_PULSEQ%"
+if not "%~2"=="" set "PULSEQ=%~2"
+if "%PULSEQ:~-1%"=="\" set "PULSEQ=%PULSEQ:~0,-1%"
+
+:: No parentheses around paths here: a ")" in a path would end the block
+if not exist "%SHARE%\" goto no_share
+if not exist "%PULSEQ%\control\" goto no_pulseq
+:: Remember what worked for the next start (setx: new consoles see it)
+if /i not "%MRX_SYNC_SHARE%"=="%SHARE%" setx MRX_SYNC_SHARE "%SHARE%" >nul
+if /i not "%MRX_SYNC_PULSEQ%"=="%PULSEQ%" setx MRX_SYNC_PULSEQ "%PULSEQ%" >nul
+
 set "INBOX=%SHARE%\inbox"
 set "STATUS=%SHARE%\status"
 set "NET_ROOT=%SHARE%\measurement"
-set "HOST_ROOT=C:\ProgramData\Siemens\Numaris\MriCustomer\CustomerSeq\pulseq\seq-files\measurement"
-set "HOST_CONTROL=C:\ProgramData\Siemens\Numaris\MriCustomer\CustomerSeq\pulseq\control"
+set "HOST_ROOT=%PULSEQ%\seq-files\measurement"
+set "HOST_CONTROL=%PULSEQ%\control"
 set "CONTROL=%HOST_CONTROL%\control.txt"
 set "POSITION=%HOST_CONTROL%\position.txt"
 
@@ -39,7 +62,7 @@ if exist "%CONTROL%" copy /Y "%CONTROL%" "%HOST_CONTROL%\archive\control-%RUN%.t
 echo 0 > "%POSITION%"
 
 set "BEAT=0"
-call :log started, run %RUN%, control.txt reset (old one in %HOST_CONTROL%\archive)
+call :log started, run %RUN%, share %SHARE%, pulseq %PULSEQ%, control.txt reset (old one in %HOST_CONTROL%\archive)
 
 :loop
 :: The date is taken every round, so a session that runs past midnight
@@ -147,3 +170,15 @@ exit /b
 echo [%date% %time:~0,8%] %*
 >> "%STATUS%\sync.log" echo [%date% %time:~0,8%] %*
 exit /b
+
+:no_share
+echo Share not found: %SHARE%
+echo Start it as: sync.bat ^<share^> [pulseq folder]   - both are remembered.
+pause
+exit /b 1
+
+:no_pulseq
+echo No control folder in the Pulseq folder %PULSEQ%
+echo Start it as: sync.bat ^<share^> ^<pulseq folder^>   - both are remembered.
+pause
+exit /b 1
