@@ -36,11 +36,12 @@
   code, pre { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .9em; background: var(--code); border-radius: 4px; overflow-wrap: anywhere; }
   code { padding: .1rem .3rem; }
   pre { padding: .75rem; white-space: pre-wrap; }
-  button {
+  button, a.button {
+    display: inline-block; text-decoration: none;
     font: inherit; font-weight: 600; padding: .45rem 1.1rem; margin: .5rem .5rem 0 0; cursor: pointer;
     color: #fff; background: var(--primary); border: 0; border-radius: 4px;
   }
-  button:hover { filter: brightness(1.15); }
+  button:hover, a.button:hover { filter: brightness(1.15); }
   .muted { color: var(--muted); font-size: .9rem; }
   .error { color: var(--error); }
 </style>
@@ -54,6 +55,8 @@
 and shows the scan token to give to the people who may measure on it. The scanner
 PC has to run <a href="sync.bat" download><code>sync.bat</code></a>, which takes the sequences from the share's
 <code>inbox</code>. A session ends 4 hours after it was last used.</p>
+<p><a class="button" href="sync.bat" download>Download sync.bat</a>
+<span class="muted">for the scanner PC, the same for every session</span></p>
 <p><label><input type="checkbox" id="conjugate" checked> <b>Complex conjugate signal:</b>
 Siemens scanners don't follow the physical convention of MRX. Checking this box will
 complex conjugate the measured signal before upload.</label></p>
