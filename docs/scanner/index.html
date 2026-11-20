@@ -36,11 +36,12 @@
   code, pre { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .9em; background: var(--code); border-radius: 4px; overflow-wrap: anywhere; }
   code { padding: .1rem .3rem; }
   pre { padding: .75rem; white-space: pre-wrap; }
-  button {
+  button, a.button {
+    display: inline-block; text-decoration: none;
     font: inherit; font-weight: 600; padding: .45rem 1.1rem; margin: .5rem .5rem 0 0; cursor: pointer;
     color: #fff; background: var(--primary); border: 0; border-radius: 4px;
   }
-  button:hover { filter: brightness(1.15); }
+  button:hover, a.button:hover { filter: brightness(1.15); }
   .muted { color: var(--muted); font-size: .9rem; }
   .error { color: var(--error); }
 </style>
@@ -52,8 +53,10 @@
 <code>mrx_scanner.py</code>, which runs on the bridge PC next to the scanner with
 <a href="https://docs.astral.sh/uv/">uv</a> (it brings its own Python and packages),
 and shows the scan token to give to the people who may measure on it. The scanner
-PC has to run <code>sync.bat</code>, which takes the sequences from the share's
+PC has to run <a href="sync.bat" download><code>sync.bat</code></a>, which takes the sequences from the share's
 <code>inbox</code>. A session ends 4 hours after it was last used.</p>
+<p><a class="button" href="sync.bat" download>Download sync.bat</a>
+<span class="muted">for the scanner PC, the same for every session</span></p>
 <p><label><input type="checkbox" id="conjugate" checked> <b>Complex conjugate signal:</b>
 Siemens scanners don't follow the physical convention of MRX. Checking this box will
 complex conjugate the measured signal before upload.</label></p>
@@ -204,7 +207,7 @@ async function create() {
     `<p><b>${text(s.file_name)}</b> was downloaded. Start <code>sync.bat</code> on the
      scanner PC, then the Pulseq interpreter, then this on the bridge PC:</p>
      <pre>uv run ${text(s.file_name)}</pre>
-     <p class="muted">Options: <code>--share</code> (default <code>W:\\neuroradiologie\\zaiss-mrx</code>),
+     <p class="muted">Options: <code>--share</code> (the share as the bridge PC sees it; remembered for the next start),
      <code>--coils</code> (20), <code>--adc-padding</code> (4), <code>--lookahead</code> (1).
      <code>uv run ${text(s.file_name)} --demo</code> tries it without a scanner.</p>
      <p><b>Scan token</b> - give it to whoever may measure on this scanner:</p>
