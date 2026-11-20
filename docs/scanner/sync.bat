@@ -22,19 +22,25 @@
 ::                   control below it  (generic default: the Siemens CustomerSeq\pulseq)
 :: What is given is remembered in the user environment variables MRX_SYNC_SHARE
 :: and MRX_SYNC_PULSEQ and used on the next start. Order: argument, variable,
-:: generic default.
+:: generic default. At start it prints the command with every setting typed in.
 
 setlocal EnableExtensions DisableDelayedExpansion
 title mrx sync
 
 :: --- Paths ------------------------------------------------------------------
 set "SHARE=V:"
+set "SHARE_FROM=the generic default, nothing remembered in MRX_SYNC_SHARE yet"
 if defined MRX_SYNC_SHARE set "SHARE=%MRX_SYNC_SHARE%"
+if defined MRX_SYNC_SHARE set "SHARE_FROM=remembered in MRX_SYNC_SHARE"
 if not "%~1"=="" set "SHARE=%~1"
+if not "%~1"=="" set "SHARE_FROM=given as the 1st argument"
 if "%SHARE:~-1%"=="\" set "SHARE=%SHARE:~0,-1%"
 set "PULSEQ=C:\ProgramData\Siemens\Numaris\MriCustomer\CustomerSeq\pulseq"
+set "PULSEQ_FROM=the generic default, nothing remembered in MRX_SYNC_PULSEQ yet"
 if defined MRX_SYNC_PULSEQ set "PULSEQ=%MRX_SYNC_PULSEQ%"
+if defined MRX_SYNC_PULSEQ set "PULSEQ_FROM=remembered in MRX_SYNC_PULSEQ"
 if not "%~2"=="" set "PULSEQ=%~2"
+if not "%~2"=="" set "PULSEQ_FROM=given as the 2nd argument"
 if "%PULSEQ:~-1%"=="\" set "PULSEQ=%PULSEQ:~0,-1%"
 
 :: No parentheses around paths here: a ")" in a path would end the block
@@ -43,6 +49,11 @@ if not exist "%PULSEQ%\control\" goto no_pulseq
 :: Remember what worked for the next start (setx: new consoles see it)
 if /i not "%MRX_SYNC_SHARE%"=="%SHARE%" setx MRX_SYNC_SHARE "%SHARE%" >nul
 if /i not "%MRX_SYNC_PULSEQ%"=="%PULSEQ%" setx MRX_SYNC_PULSEQ "%PULSEQ%" >nul
+set "COMMAND=sync.bat "%SHARE%" "%PULSEQ%""
+echo.
+echo Next time, the same settings are:
+echo   %COMMAND%
+echo.
 
 set "INBOX=%SHARE%\inbox"
 set "STATUS=%SHARE%\status"
@@ -62,7 +73,8 @@ if exist "%CONTROL%" copy /Y "%CONTROL%" "%HOST_CONTROL%\archive\control-%RUN%.t
 echo 0 > "%POSITION%"
 
 set "BEAT=0"
-call :log started, run %RUN%, share %SHARE%, pulseq %PULSEQ%, control.txt reset (old one in %HOST_CONTROL%\archive)
+call :log started, run %RUN%, control.txt reset (old one in %HOST_CONTROL%\archive)
+call :log same settings next time: %COMMAND%
 
 :loop
 :: The date is taken every round, so a session that runs past midnight
@@ -173,12 +185,14 @@ exit /b
 
 :no_share
 echo Share not found: %SHARE%
+echo The share is %SHARE_FROM%.
 echo Start it as: sync.bat ^<share^> [pulseq folder]   - both are remembered.
 pause
 exit /b 1
 
 :no_pulseq
 echo No control folder in the Pulseq folder %PULSEQ%
+echo The Pulseq folder is %PULSEQ_FROM%.
 echo Start it as: sync.bat ^<share^> ^<pulseq folder^>   - both are remembered.
 pause
 exit /b 1

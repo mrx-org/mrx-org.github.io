@@ -68,13 +68,12 @@ CONJUGATE = "__MRX_CONJUGATE__" != "no"
 
 VERSION = "2.0.0-dev"
 
-# The defaults for the site this was built for; every one can be overridden
-# The share is remembered per user in this environment variable: `--share`
-# stores it, and the next start uses it. Without one, a generic drive letter.
-SHARE_ENV = "MRX_SHARE"
+# Generic defaults: no site's paths are built in. What a site needs is given
+# once and remembered per user (see `SITE_SETTINGS`).
 GENERIC_SHARE = "V:\\"
 DEFAULT_COILS = 20
 DEFAULT_ADC_PADDING = 4
+DEFAULT_LOOKAHEAD = 1
 
 # How often the script talks to the gateway: often while a job is on its way,
 # less when idle - a new job waits at most this long while the scanner is free.
@@ -1403,15 +1402,28 @@ def remember(name: str, value: str) -> None:
             pass
 
 
+# The settings of a site, remembered per user: one given on the command line is
+# stored in its environment variable (once the script could use it), one not
+# given comes from the variable, else from the generic default.
+#   attribute: (option, environment variable, generic default)
+SITE_SETTINGS = {
+    "share": ("--share", "MRX_SHARE", GENERIC_SHARE),
+    "coils": ("--coils", "MRX_COILS", str(DEFAULT_COILS)),
+    "adc_padding": ("--adc-padding", "MRX_ADC_PADDING", str(DEFAULT_ADC_PADDING)),
+}
+
+
 def settings(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Measures the sequences queued on this scanner session.")
-    parser.add_argument(
-        "--share",
-        help="the scanner share as this PC sees it (default: the last one used, kept in %{}%, else {})".format(SHARE_ENV, GENERIC_SHARE),
+    parser = argparse.ArgumentParser(
+        description="Measures the sequences queued on this scanner session. --share, --coils and "
+        "--adc-padding are remembered for the next start (user environment variables)."
     )
-    parser.add_argument("--coils", type=int, default=DEFAULT_COILS, help="receive coils (default %(default)s)")
-    parser.add_argument("--adc-padding", type=int, default=DEFAULT_ADC_PADDING, help="extra samples per coil readout (default %(default)s)")
-    parser.add_argument("--lookahead", type=int, default=1, help="jobs kept scheduled behind the measurement in progress (default %(default)s)")
+    parser.add_argument("--share", help="the scanner share as this PC sees it (default: the last one given, else {})".format(GENERIC_SHARE))
+    parser.add_argument("--coils", type=int, help="receive coils (default: the last one given, else {})".format(DEFAULT_COILS))
+    parser.add_argument(
+        "--adc-padding", type=int, help="extra samples per coil readout (default: the last one given, else {})".format(DEFAULT_ADC_PADDING)
+    )
+    parser.add_argument("--lookahead", type=int, default=DEFAULT_LOOKAHEAD, help="jobs kept scheduled behind the measurement in progress (default %(default)s)")
     parser.add_argument("--workdir", help="where downloaded sequences and the state file go (default: next to this script)")
     parser.add_argument("--simulate", action="store_true", help="no scanner: play sync.bat and the scanner on a local folder, the data is noise")
     parser.add_argument("--demo", action="store_true", help="no gateway either: made-up jobs (implies --simulate)")
@@ -1419,7 +1431,57 @@ def settings(argv: list[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.demo:
         args.simulate = True
+
+    # Fill in what was not given, and note where each value came from
+    args.given = {name for name in SITE_SETTINGS if getattr(args, name) is not None}
+    args.source = {}
+    for name, (option, variable, generic) in SITE_SETTINGS.items():
+        if name in args.given:
+            args.source[name] = "given with " + option
+            continue
+        if name == "share" and args.simulate:
+            continue  # main() puts the simulated share into the work folder
+        value, args.source[name] = remembered(variable), "remembered in %{}%".format(variable)
+        if value is not None and name != "share":
+            try:
+                value = int(value)
+            except ValueError:
+                print("ignoring %{}% = {!r}: not a number".format(variable, value))
+                value = None
+        if value is None:
+            value, args.source[name] = generic, "the generic default, nothing remembered in %{}% yet".format(variable)
+            if name != "share":
+                value = int(value)
+        setattr(args, name, value)
+
+    if args.coils < 1 or args.adc_padding < 0 or args.lookahead < 0:
+        parser.error("--coils must be at least 1, --adc-padding and --lookahead not negative")
     return args
+
+
+def command_line(args: argparse.Namespace) -> str:
+    """The command that starts the script again with every setting typed in."""
+
+    def quote(value) -> str:
+        value = str(value)
+        if " " not in value:
+            return value
+        # A backslash right before the closing quote would escape it
+        return '"{}"'.format(value + "\\" if value.endswith("\\") else value)
+
+    parts = ["uv", "run", quote(Path(sys.argv[0]).name or "mrx_scanner.py")]
+    if args.share is not None and not (args.simulate and "share" not in args.given):
+        parts += ["--share", quote(args.share)]
+    parts += ["--coils", str(args.coils), "--adc-padding", str(args.adc_padding), "--lookahead", str(args.lookahead)]
+    if args.workdir:
+        parts += ["--workdir", quote(args.workdir)]
+    if args.demo:
+        parts.append("--demo")
+    elif args.simulate:
+        parts.append("--simulate")
+    if args.sim_duration is not None:
+        parts += ["--sim-duration", "{:g}".format(args.sim_duration)]
+    return " ".join(parts)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1433,30 +1495,32 @@ def main(argv: list[str] | None = None) -> int:
         workdir = workdir / "demo"
         shutil.rmtree(workdir, ignore_errors=True)  # every demo starts empty
     workdir.mkdir(parents=True, exist_ok=True)
-    if args.share:
-        share_root = Path(args.share)
-    elif args.simulate:
-        share_root = workdir / "share"
-    else:
-        share_root = Path(remembered(SHARE_ENV) or GENERIC_SHARE)
-    share = Share(share_root)
+    share = Share(Path(args.share) if args.share is not None else workdir / "share")
     scanner = SimulatedScanner(share, args.coils, args.adc_padding, args.sim_duration) if args.simulate else None
     problems = share.check()
     if problems:
         print("\n".join(problems))
-        if not args.share and not args.simulate:
-            print("Give the share with --share; it is remembered for the next start.")
+        if "share" in args.source:
+            print("The share {} is {}.".format(share.root, args.source["share"]))
+        print("Start with --share <the share as this PC sees it>; it is remembered for the next start.")
         return 1
+    # Only real runs are remembered: a simulation must not change the site
     if not args.simulate:
-        remember(SHARE_ENV, str(share.root))
+        for name in args.given:
+            remember(SITE_SETTINGS[name][1], str(share.root) if name == "share" else str(getattr(args, name)))
+
+    command = command_line(args)
+    print("\nNext time, the same settings are:\n  {}\n".format(command))
 
     log = EventLog(workdir if args.demo else SCRIPT_DIR)
     gateway = DemoGateway() if args.demo else HttpGateway(BASE_URL, RUNNER_SECRET)
     engine = Engine(gateway, share, workdir, log, args.coils, args.adc_padding, args.lookahead, scanner)
     mode = "DEMO" if args.demo else "SIMULATION" if args.simulate else "LIVE"
     log("script.start", "started ({}), share {}".format(mode.lower(), share.root), version=VERSION)
+    log("script.command", "same settings next time: " + command)
     ScannerApp(engine, {"mode": mode, "share": str(share.root)}).run()
     log("script.stop", "stopped")
+    print("Next time, the same settings are:\n  {}".format(command))
     return 0
 
 
