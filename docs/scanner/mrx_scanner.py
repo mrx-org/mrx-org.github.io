@@ -17,7 +17,7 @@ the mcp-gateway repo, and the pipeline in `docs/scan/design.md`.
 In short: the script downloads every job at once, drops one at a time (or
 `--lookahead`) into the share's `inbox\\`, from where `sync.bat` puts it into
 `control.txt`, reads what the scanner does from the share's `status\\`, and
-converts and uploads each `.seq.dat` once it is there.
+uploads each job's signal (`<name>.seq.npy`) once its `<name>.seq.done` is there.
 
 This file lives only here, next to the session page on anyfield.net
 (`docs/scanner/`), which hands it out with a session's secrets filled in. The
@@ -38,7 +38,6 @@ import shutil
 import subprocess
 import sys
 import time
-import warnings
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 from pathlib import Path, PureWindowsPath
@@ -71,9 +70,8 @@ VERSION = "2.0.0-dev"
 # Generic defaults: no site's paths are built in. What a site needs is given
 # once and remembered per user (see `SITE_SETTINGS`).
 GENERIC_SHARE = "V:\\"
-DEFAULT_COILS = 20
-DEFAULT_ADC_PADDING = 4
 DEFAULT_LOOKAHEAD = 1
+SIM_COILS = 20  # the simulated scanner's receive coils
 
 # How often the script talks to the gateway: often while a job is on its way,
 # less when idle - a new job waits at most this long while the scanner is free.
@@ -84,6 +82,10 @@ SYNC_IDLE = 5.0  # seconds
 # `sync.bat` writes its heartbeat every ~3 s. One that has not changed for this
 # long means it is not running.
 SYNC_BAT_TIMEOUT = 15.0  # seconds
+# A job measured before another whose data has been on the share this long,
+# without data of its own, never gets any: the sequence gave up waiting for the
+# ICE program (60 s after the next prep began) and left nothing.
+LOST_AFTER = 30.0  # seconds
 
 FINAL = frozenset({"done", "cancelled", "failed", "expired"})
 # The reason a cancel gets when it comes without one. Aborts on the scanner get
@@ -103,8 +105,9 @@ class ScanError(Exception):
 # =============================================================================
 # Pulseq: how long every ADC event is
 # =============================================================================
-# The `.seq.dat` has no header, so the only way to know where one readout ends
-# and the next begins is the sequence that was measured. Reading the ADC events
+# The signal does not say where one Pulseq ADC ends and the next begins (a long
+# ADC is several scans), so the only way to know - and to tell a complete
+# measurement from one cut short - is the sequence that was measured. Reading the ADC events
 # rather than `Nread`-style definitions means any sequence works, including ones
 # whose ADCs differ in length (DREAM).
 
@@ -171,76 +174,110 @@ def demo_seq(adcs: int, samples: int, duration: float) -> str:
 
 
 # =============================================================================
-# `.seq.dat` -> `signal.npy`
+# What the scanner leaves: `<name>.seq.npy`, `.seq.scans.npy`, `.seq.done`
 # =============================================================================
-# The ICE program writes one `<re> <im>` line per sample, nested ADC -> coil ->
-# sample, with `padding` samples nobody understands at the end of every coil's
-# readout (see `docs/scan/dat-format.md`). What `scan` hands out is the same
-# signal as `(ADC samples, coils)`: row k is sample k of every coil.
+# Next to every measured `.seq` the sequence puts the ICE program's files (see
+# `docs/scanner-script-notes.md` in the pulseq_zero_va repo):
+#   <name>.seq.npy        the signal, complex64 `(samples, coils)`: row k is
+#                         sample k of every coil, the scans in the order they
+#                         came. A long ADC is split into several scans, whose
+#                         rows follow each other, so the rows are exactly the
+#                         samples of the Pulseq ADCs. This is already the shape
+#                         `scan` hands out.
+#   <name>.seq.scans.npy  one record per scan (`SCANS_DTYPE`), not read here
+#   <name>.seq.done       written last: the set is complete. `<key> <value>`
+#                         lines: format, status, scans, rows, channels,
+#                         skipped_scans.
+
+DONE_FORMAT = "1"
+DONE_STATUSES = ("complete", "aborted", "empty", "failed")
+SCANS_DTYPE = np.dtype(
+    [("offset", "<i8"), ("n", "<i4"), ("flags", "<u4"), ("scan_counter", "<u4"), ("time_stamp", "<u4")]
+    + [(name, "<u2") for name in ("lin", "par", "slc", "eco", "rep", "set", "seg", "acq", "phs")]
+)
 
 
-def expected_lines(adc_counts: list[int], coils: int, padding: int) -> int:
-    return coils * sum(n + padding for n in adc_counts)
+def read_done(path: Path) -> dict | None:
+    """The `<key> <value>` lines of a `.done`. None while it cannot be read or
+    has no `status` line yet (a copy in progress)."""
+    try:
+        text = Path(path).read_text(errors="replace")
+    except OSError:
+        return None
+    done = {}
+    for line in text.splitlines():
+        words = line.split("#", 1)[0].split()
+        if len(words) >= 2:
+            done[words[0]] = words[1]
+    return done if "status" in done else None
 
 
-def whole_adcs(n_lines: int, adc_counts: list[int], coils: int, padding: int) -> int | None:
-    """How many ADCs `n_lines` lines hold, if they end exactly after one. An
-    aborted measurement leaves such a `.seq.dat`: fewer ADCs, but whole ones."""
+def check_done(done: dict, name: str) -> str:
+    """The status of a `.done` whose signal can be used: `complete` or
+    `aborted`. Raises `ScanError` for everything else, worded for the operator."""
+    if done.get("format") != DONE_FORMAT:
+        raise ScanError(
+            "{}.done has format {}, this script reads format {} - download the script again".format(
+                name, done.get("format", "(none)"), DONE_FORMAT
+            )
+        )
+    status = done["status"]
+    if status == "empty":
+        raise ScanError("the sequence has no ADCs measured (the ICE program got no scan)")
+    if status == "failed":
+        raise ScanError("the ICE program could not rename one of its files: data may be missing (status failed in {}.done)".format(name))
+    if status not in DONE_STATUSES:
+        raise ScanError("{}.done has the unknown status {!r}".format(name, status))
+    try:
+        skipped = int(done.get("skipped_scans", "0"))
+    except ValueError:
+        raise ScanError("{}.done: skipped_scans is not a number: {!r}".format(name, done["skipped_scans"]))
+    if skipped:
+        raise ScanError("{} scans with a different number of coils are missing from the signal (skipped_scans in {}.done)".format(skipped, name))
+    return status
+
+
+def whole_adcs(rows: int, adc_counts: list[int]) -> int:
+    """How many whole ADCs the first `rows` rows of the signal hold. An aborted
+    measurement can end between the scans of one long ADC: that one is cut off."""
     total = 0
     for k, n in enumerate(adc_counts):
-        if total == n_lines:
+        total += n
+        if total > rows:
             return k
-        total += coils * (n + padding)
-    return len(adc_counts) if total == n_lines else None
+    return len(adc_counts)
 
 
-def read_dat(dat) -> np.ndarray:
-    """Every `<re> <im>` line of a `.seq.dat` (a path or an open text file) as
-    one flat complex64 array, in file order. Raises `ValueError` if a line is
-    not two numbers."""
-    try:
-        with warnings.catch_warnings():
-            # An empty file is no different from one cut short: the caller says so
-            warnings.simplefilter("ignore", UserWarning)
-            values = np.loadtxt(dat, dtype=np.float32, ndmin=2)
-    except ValueError as e:
-        raise ValueError("every line of the .seq.dat must be '<re> <im>': {}".format(str(e).split(";")[0]))
-    if values.size == 0:
-        return np.zeros(0, dtype="<c8")
-    if values.shape[1] != 2:
-        raise ValueError("every line of the .seq.dat must be '<re> <im>', these have {} values".format(values.shape[1]))
-    return np.ascontiguousarray(values, dtype="<f4").view("<c8").ravel()
-
-
-def convert(samples: np.ndarray, adc_counts: list[int], coils: int, padding: int) -> np.ndarray:
-    """The samples from `read_dat` as complex64 of shape `(ADC samples, coils)`.
-    Raises `ValueError` if they do not have the layout the arguments describe."""
-    expected = expected_lines(adc_counts, coils, padding)
-    if len(samples) != expected:
-        raise ValueError(
-            "the .seq.dat has {} lines, but {} coils x (ADC samples + {} padding) "
-            "for this sequence make {} - check --coils and --adc-padding".format(len(samples), coils, padding, expected)
-        )
-    parts, offset = [], 0
-    for n in adc_counts:
-        # One ADC is `coils` readouts of `n + padding` samples in a row; its
-        # transpose without the padding is `n` rows of the output.
-        block = samples[offset : offset + coils * (n + padding)].reshape(coils, n + padding)
-        parts.append(block[:, :n].T)
-        offset += coils * (n + padding)
-    if not parts:
-        return np.zeros((0, coils), dtype="<c8")
-    return np.concatenate(parts).astype("<c8", copy=False)
-
-
-def write_fake_dat(path: Path, adc_counts: list[int], coils: int, padding: int, rng=None) -> None:
-    """Noise in the ICE program's layout, which the simulated scanner writes in
-    place of a measurement - so the conversion runs on it too."""
-    lines = expected_lines(adc_counts, coils, padding)
-    data = (rng or np.random.default_rng()).standard_normal((lines, 2)).astype(np.float32)
+def save_npy(path: Path, array: np.ndarray) -> None:
+    """`np.save` to `<path>.tmp`, then rename, so nobody reads half a file."""
     tmp = path.with_name(path.name + ".tmp")
-    np.savetxt(tmp, data, fmt="%.6f")
+    with open(tmp, "wb") as f:  # a file, not a name: np.save would append ".npy"
+        np.save(f, array, allow_pickle=False)
     os.replace(tmp, path)
+
+
+def write_fake_result(seq: Path, adc_counts: list[int], coils: int, status: str = "complete", rows: int | None = None, rng=None) -> None:
+    """Noise as the sequence leaves the ICE program's files next to `seq`,
+    which the simulated scanner writes in place of a measurement. `rows` cuts
+    the signal short (an abort); a sequence without ADCs leaves only a `.done`."""
+    rng = rng or np.random.default_rng()
+    rows = sum(adc_counts) if rows is None else rows
+    if not adc_counts:
+        status, rows = "empty", 0
+    scans = []
+    if status != "empty":
+        shape = (rows, coils)
+        signal = (rng.standard_normal(shape) + 1j * rng.standard_normal(shape)).astype("<c8")
+        offset = 0
+        for k, n in enumerate(adc_counts):
+            if offset >= rows:
+                break
+            scans.append((offset, min(n, rows - offset), 0, k + 1, 0, k) + (0,) * 8)
+            offset += n
+        save_npy(seq.with_name(seq.name + ".npy"), signal)
+        save_npy(seq.with_name(seq.name + ".scans.npy"), np.array(scans, dtype=SCANS_DTYPE))
+    done = "format {}\nstatus {}\nscans {}\nrows {}\nchannels {}\nskipped_scans 0\n".format(DONE_FORMAT, status, len(scans), rows, coils)
+    write_atomic(seq.with_name(seq.name + ".done"), done.encode())
 
 
 def write_atomic(path: Path, data: bytes) -> None:
@@ -267,7 +304,7 @@ def clock(seconds: float) -> str:
 # The share: inbox, status, measurement
 # =============================================================================
 # See `docs/scan/scanner-setup.md`. The script writes only into `inbox\\` (and
-# its converted signals next to the `.seq.dat`); everything else is `sync.bat`'s.
+# a conjugated signal next to the `.seq.npy`); everything else is `sync.bat`'s.
 
 
 @dataclass
@@ -328,26 +365,24 @@ class Share:
         except (OSError, ValueError, IndexError):
             return None
 
-    def dat(self, day: str, name: str) -> Path:
-        return self.measurement / day / (name + ".dat")
-
-    def dat_in_transfer(self, day: str, name: str) -> bool:
-        return (self.measurement / day / (name + ".dat.tmp")).exists()
+    def result(self, day: str, name: str, suffix: str) -> Path:
+        """A file of the `.seq` called `name`: `.npy`, `.scans.npy` or `.done`."""
+        return self.measurement / day / (name + suffix)
 
 
 class SimulatedScanner:
     """Plays `sync.bat`, the Pulseq interpreter and the ICE program on a local
     folder with the share's layout, for `--simulate`. Every `tick` is one round
     of `sync.bat`; a measurement takes the sequence's `TotalDuration` (or
-    `duration`) and then writes noise as its `.seq.dat`."""
+    `duration`) and then writes noise as its `.seq.npy`, `.seq.scans.npy` and
+    `.seq.done`. (The real ones arrive only with the next prep; here at once.)"""
 
     HOST = r"C:\ProgramData\Siemens\Numaris\MriCustomer\CustomerSeq\pulseq\seq-files\measurement"
 
-    def __init__(self, share: Share, coils: int, padding: int, duration: float | None = None) -> None:
+    def __init__(self, share: Share, duration: float | None = None, coils: int = SIM_COILS) -> None:
         self.share = share
-        self.coils = coils
-        self.padding = padding
         self.duration = duration
+        self.coils = coils
         for folder in (share.inbox, share.status_dir, share.measurement):
             folder.mkdir(parents=True, exist_ok=True)
         self.beat = 0
@@ -363,7 +398,8 @@ class SimulatedScanner:
         self._publish()
 
     def abort(self) -> bool:
-        """The supervisor stops the measurement: half of it is written."""
+        """The supervisor stops the measurement: about half of it is written,
+        ending in the middle of an ADC as an abort between scans can."""
         if self.current is None:
             return False
         self._finish(abort=True)
@@ -392,8 +428,11 @@ class SimulatedScanner:
     def _finish(self, abort: bool = False) -> None:
         seq, counts = self.current["seq"], self.current["counts"]
         if abort:
-            counts = counts[: len(counts) // 2]
-        write_fake_dat(seq.with_name(seq.name + ".dat"), counts, self.coils, self.padding)
+            half = len(counts) // 2
+            rows = sum(counts[:half]) + (counts[half] // 2 if half < len(counts) else 0)
+            write_fake_result(seq, counts, self.coils, "aborted", rows)
+        else:
+            write_fake_result(seq, counts, self.coils)
         self.current = None
 
     def _publish(self) -> None:
@@ -590,7 +629,7 @@ class Job:
     file: str = ""  # its name in the inbox and in control.txt
     day: str = ""  # its date folder, from control.txt
     line: int = 0  # its line in control.txt, from 1
-    on_scanner: bool = False  # dropped and its .seq.dat not there yet
+    on_scanner: bool = False  # dropped and its .seq.done not there yet
     read: bool = False  # the interpreter has read its line
     discard: bool = False  # cancelled once on the scanner: its data is dropped
     measuring_since: float = 0.0
@@ -651,16 +690,12 @@ class Engine:
         share: Share,
         workdir: Path,
         log: EventLog,
-        coils: int = DEFAULT_COILS,
-        padding: int = DEFAULT_ADC_PADDING,
         lookahead: int = 1,
         scanner: SimulatedScanner | None = None,
     ) -> None:
         self.gateway = gateway
         self.share = share
         self.log = log
-        self.coils = coils
-        self.padding = padding
         self.lookahead = lookahead
         self.scanner = scanner
         self.seq_dir = Path(workdir) / "jobs"
@@ -861,7 +896,7 @@ class Engine:
             elif not job.read:
                 continue  # still in the inbox, or on its way from there
             # A job already read is looked for even when its line is gone (a
-            # restarted sync.bat): its .seq.dat still arrives.
+            # restarted sync.bat): its data still arrives.
             if not job.read and job.line <= status.position:
                 job.read = True
                 job.measuring_since = time.time()
@@ -873,15 +908,39 @@ class Engine:
                 if job.state == "scheduled":
                     job.message = "in control.txt, line {}".format(job.line)
                 continue
-            if self.share.dat(job.day, job.file).exists():
+            if read_done(self.share.result(job.day, job.file, ".done")) is not None:
                 job.on_scanner = False
                 job.measured = time.time()
                 if job.discard:
                     self.log("job.discarded", "measured, data discarded (the job was cancelled)", job=job)
                 else:
                     self.spawn(job, self.process(job))
-            elif job.state == "measuring" and self.share.dat_in_transfer(job.day, job.file):
-                job.message = "measured, the .seq.dat is being copied"
+            elif job.state == "measuring" and self.share.result(job.day, job.file, ".npy").exists():
+                job.message = "measured, the data is being copied"
+        self.find_lost()
+
+    def find_lost(self) -> None:
+        """Jobs whose data never comes: the interpreter measures in name order
+        (the drop order), and the data of a later job has been there for
+        `LOST_AFTER` - the sequence gave up waiting for the ICE program."""
+        now = time.time()
+        arrived = [job.file for job in self.jobs.values() if job.measured and now - job.measured > LOST_AFTER]
+        if not arrived:
+            return
+        latest = max(arrived)
+        for job in self.jobs.values():
+            if job.on_scanner and job.read and job.file < latest:
+                job.on_scanner = False
+                if job.discard:
+                    self.log("job.discarded", "measured, but no data came (the job was cancelled)", job=job)
+                elif job.state not in FINAL:
+                    self.set(
+                        job,
+                        "failed",
+                        "no data came from the scanner, but for a later job: the sequence gave up "
+                        "waiting for the ICE program (see the scanner's trace log)",
+                        level="error",
+                    )
 
     def scanner_restarted(self, status: ScannerStatus) -> None:
         """`sync.bat` started again with a fresh `control.txt`: what was dropped
@@ -895,8 +954,8 @@ class Engine:
                     self.set(job, "ready", "sync.bat restarted before it was measured: scheduled again")
 
     async def process(self, job: Job) -> None:
-        """Convert the `.seq.dat` and upload the signal."""
-        self.set(job, "converting", "reading " + job.file + ".dat")
+        """Check the job's `.seq.done` and `.seq.npy` and upload the signal."""
+        self.set(job, "converting", "reading " + job.file + ".npy")
         partial = await asyncio.to_thread(self._convert, job)
         if job.state != "converting":
             return  # cancelled meanwhile
@@ -909,27 +968,39 @@ class Engine:
         await self.upload(job)
 
     def _convert(self, job: Job) -> tuple[int, int] | None:
-        """Write the job's signal next to its `.seq.dat`. Returns `(ADCs
-        measured, ADCs in the sequence)` if the measurement was aborted."""
+        """Check what the scanner left for the job and set `job.npy` to the
+        signal to upload: the `.seq.npy` itself, or - conjugated or cut to
+        whole ADCs - a `.seq.signal.npy` next to it. Returns `(ADCs measured,
+        ADCs in the sequence)` if the measurement was aborted."""
         counts = adc_sample_counts(self.seq_path(job).read_text(encoding="utf-8", errors="replace"))
-        dat = self.share.dat(job.day, job.file)
-        samples = read_dat(dat)
+        done = read_done(self.share.result(job.day, job.file, ".done"))
+        if done is None:
+            raise ScanError("{}.done cannot be read".format(job.file))
+        status = check_done(done, job.file)
+        path = self.share.result(job.day, job.file, ".npy")
+        try:
+            signal = np.load(path, allow_pickle=False)
+        except (OSError, ValueError) as e:
+            raise ScanError("{}.npy cannot be read: {}".format(job.file, e))
+        if signal.ndim != 2 or signal.dtype != np.dtype("<c8"):
+            raise ScanError("{}.npy is {} {}, not complex64 (samples, coils)".format(job.file, signal.dtype, signal.shape))
+        rows, total = signal.shape[0], sum(counts)
+        if done.get("rows", str(rows)) != str(rows):
+            raise ScanError("{}.npy has {} rows, its .done says {}".format(job.file, rows, done["rows"]))
+        if rows > total or (status == "complete" and rows != total):
+            raise ScanError("{}.npy has {} rows, but the ADCs of the sequence have {} samples".format(job.file, rows, total))
         partial = None
-        if len(samples) != expected_lines(counts, self.coils, self.padding):
-            k = whole_adcs(len(samples), counts, self.coils, self.padding)
-            if k is None:
-                convert(samples, counts, self.coils, self.padding)  # raises with the details
-            partial, counts = (k, len(counts)), counts[:k]
-        signal = convert(samples, counts, self.coils, self.padding)
-        del samples
-        if CONJUGATE:
-            np.conjugate(signal, out=signal)
-        npy = dat.with_name(job.file + ".signal.npy")
-        tmp = npy.with_name(npy.name + ".tmp")
-        with open(tmp, "wb") as f:
-            np.save(f, signal, allow_pickle=False)
-        os.replace(tmp, npy)
-        job.npy, job.shape, job.partial = str(npy), list(signal.shape), partial is not None
+        if rows < total:  # aborted: keep the whole ADCs
+            k = whole_adcs(rows, counts)
+            partial, rows = (k, len(counts)), sum(counts[:k])
+            signal = signal[:rows]
+        if CONJUGATE or partial is not None:
+            signal = np.ascontiguousarray(signal)
+            if CONJUGATE:
+                np.conjugate(signal, out=signal)
+            path = path.with_name(job.file + ".signal.npy")
+            save_npy(path, signal)
+        job.npy, job.shape, job.partial = str(path), list(signal.shape), partial is not None
         return partial
 
     async def upload(self, job: Job) -> None:
@@ -1185,7 +1256,7 @@ class ScannerApp(App):
         info.append(*{True: ("online", "green"), False: ("offline", "bold red"), None: ("…", "dim")}[e.gateway_online])
         info.append(" · sync.bat ")
         info.append(*(("running", "green") if e.sync_bat_alive else ("not running", "bold red")))
-        info.append(" · {} · {} coils, padding {} · lookahead {} · v{}".format(s["share"], e.coils, e.padding, e.lookahead, VERSION))
+        info.append(" · {} · lookahead {} · v{}".format(s["share"], e.lookahead, VERSION))
         if e.latest_version != VERSION:
             info.append("  new script version {}: download it again".format(e.latest_version), style="bold yellow")
         if e.ended:
@@ -1408,21 +1479,15 @@ def remember(name: str, value: str) -> None:
 #   attribute: (option, environment variable, generic default)
 SITE_SETTINGS = {
     "share": ("--share", "MRX_SHARE", GENERIC_SHARE),
-    "coils": ("--coils", "MRX_COILS", str(DEFAULT_COILS)),
-    "adc_padding": ("--adc-padding", "MRX_ADC_PADDING", str(DEFAULT_ADC_PADDING)),
 }
 
 
 def settings(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Measures the sequences queued on this scanner session. --share, --coils and "
-        "--adc-padding are remembered for the next start (user environment variables)."
+        description="Measures the sequences queued on this scanner session. --share is remembered "
+        "for the next start (a user environment variable)."
     )
     parser.add_argument("--share", help="the scanner share as this PC sees it (default: the last one given, else {})".format(GENERIC_SHARE))
-    parser.add_argument("--coils", type=int, help="receive coils (default: the last one given, else {})".format(DEFAULT_COILS))
-    parser.add_argument(
-        "--adc-padding", type=int, help="extra samples per coil readout (default: the last one given, else {})".format(DEFAULT_ADC_PADDING)
-    )
     parser.add_argument("--lookahead", type=int, default=DEFAULT_LOOKAHEAD, help="jobs kept scheduled behind the measurement in progress (default %(default)s)")
     parser.add_argument("--workdir", help="where downloaded sequences and the state file go (default: next to this script)")
     parser.add_argument("--simulate", action="store_true", help="no scanner: play sync.bat and the scanner on a local folder, the data is noise")
@@ -1442,20 +1507,12 @@ def settings(argv: list[str] | None = None) -> argparse.Namespace:
         if name == "share" and args.simulate:
             continue  # main() puts the simulated share into the work folder
         value, args.source[name] = remembered(variable), "remembered in %{}%".format(variable)
-        if value is not None and name != "share":
-            try:
-                value = int(value)
-            except ValueError:
-                print("ignoring %{}% = {!r}: not a number".format(variable, value))
-                value = None
         if value is None:
             value, args.source[name] = generic, "the generic default, nothing remembered in %{}% yet".format(variable)
-            if name != "share":
-                value = int(value)
         setattr(args, name, value)
 
-    if args.coils < 1 or args.adc_padding < 0 or args.lookahead < 0:
-        parser.error("--coils must be at least 1, --adc-padding and --lookahead not negative")
+    if args.lookahead < 0:
+        parser.error("--lookahead must not be negative")
     return args
 
 
@@ -1472,7 +1529,7 @@ def command_line(args: argparse.Namespace) -> str:
     parts = ["uv", "run", quote(Path(sys.argv[0]).name or "mrx_scanner.py")]
     if args.share is not None and not (args.simulate and "share" not in args.given):
         parts += ["--share", quote(args.share)]
-    parts += ["--coils", str(args.coils), "--adc-padding", str(args.adc_padding), "--lookahead", str(args.lookahead)]
+    parts += ["--lookahead", str(args.lookahead)]
     if args.workdir:
         parts += ["--workdir", quote(args.workdir)]
     if args.demo:
@@ -1496,7 +1553,7 @@ def main(argv: list[str] | None = None) -> int:
         shutil.rmtree(workdir, ignore_errors=True)  # every demo starts empty
     workdir.mkdir(parents=True, exist_ok=True)
     share = Share(Path(args.share) if args.share is not None else workdir / "share")
-    scanner = SimulatedScanner(share, args.coils, args.adc_padding, args.sim_duration) if args.simulate else None
+    scanner = SimulatedScanner(share, args.sim_duration) if args.simulate else None
     problems = share.check()
     if problems:
         print("\n".join(problems))
@@ -1514,7 +1571,7 @@ def main(argv: list[str] | None = None) -> int:
 
     log = EventLog(workdir if args.demo else SCRIPT_DIR)
     gateway = DemoGateway() if args.demo else HttpGateway(BASE_URL, RUNNER_SECRET)
-    engine = Engine(gateway, share, workdir, log, args.coils, args.adc_padding, args.lookahead, scanner)
+    engine = Engine(gateway, share, workdir, log, args.lookahead, scanner)
     mode = "DEMO" if args.demo else "SIMULATION" if args.simulate else "LIVE"
     log("script.start", "started ({}), share {}".format(mode.lower(), share.root), version=VERSION)
     log("script.command", "same settings next time: " + command)

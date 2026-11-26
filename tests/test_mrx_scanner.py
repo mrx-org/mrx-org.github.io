@@ -23,12 +23,12 @@ ms = importlib.util.module_from_spec(spec)
 sys.modules["mrx_scanner"] = ms
 spec.loader.exec_module(ms)
 
-COILS, PADDING = 2, 4
+COILS = 2
 
 
 def make(tmp_path, jobs=0, duration=0.05, lookahead=1):
     share = ms.Share(tmp_path / "share")
-    scanner = ms.SimulatedScanner(share, COILS, PADDING, duration)
+    scanner = ms.SimulatedScanner(share, duration, COILS)
     gateway = ms.DemoGateway(first=jobs, every=None, rng=random.Random(1))
 
     async def download(job):
@@ -39,7 +39,7 @@ def make(tmp_path, jobs=0, duration=0.05, lookahead=1):
 
     gateway.download, gateway.upload = download, upload
     log = ms.EventLog(tmp_path / "logs")
-    engine = ms.Engine(gateway, share, tmp_path / "work", log, COILS, PADDING, lookahead, scanner)
+    engine = ms.Engine(gateway, share, tmp_path / "work", log, lookahead, scanner)
     return engine, gateway, scanner
 
 
@@ -69,11 +69,46 @@ def test_demo_seq_is_read_back():
 
 def test_whole_adcs():
     counts = [10, 20, 30]
-    per = [COILS * (n + PADDING) for n in counts]
-    assert ms.whole_adcs(0, counts, COILS, PADDING) == 0
-    assert ms.whole_adcs(per[0], counts, COILS, PADDING) == 1
-    assert ms.whole_adcs(sum(per), counts, COILS, PADDING) == 3
-    assert ms.whole_adcs(per[0] + 1, counts, COILS, PADDING) is None
+    assert ms.whole_adcs(0, counts) == 0
+    assert ms.whole_adcs(9, counts) == 0
+    assert ms.whole_adcs(10, counts) == 1
+    assert ms.whole_adcs(29, counts) == 1  # cut in the middle of the 2nd ADC
+    assert ms.whole_adcs(60, counts) == 3
+
+
+def test_read_and_check_done(tmp_path):
+    path = tmp_path / "a.seq.done"
+    assert ms.read_done(path) is None
+    path.write_text("format 1\n")  # still being copied
+    assert ms.read_done(path) is None
+    path.write_text("format 1\nstatus complete   # comment\nscans 3\nskipped_scans 0\n")
+    done = ms.read_done(path)
+    assert done["status"] == "complete" and done["scans"] == "3"
+    assert ms.check_done(done, "a.seq") == "complete"
+    assert ms.check_done({**done, "status": "aborted"}, "a.seq") == "aborted"
+    for bad, words in (
+        ({"format": "2"}, "format 2"),
+        ({"status": "empty"}, "no ADCs"),
+        ({"status": "failed"}, "failed"),
+        ({"status": "odd"}, "unknown"),
+        ({"skipped_scans": "4"}, "4 scans"),
+    ):
+        with pytest.raises(ms.ScanError, match=words):
+            ms.check_done({**done, **bad}, "a.seq")
+
+
+def test_fake_result_has_the_scanner_layout(tmp_path):
+    seq = tmp_path / "a.seq"
+    ms.write_fake_result(seq, [16, 32], 3, "aborted", rows=20)
+    signal = np.load(tmp_path / "a.seq.npy")
+    scans = np.load(tmp_path / "a.seq.scans.npy")
+    assert signal.shape == (20, 3) and signal.dtype == np.complex64
+    assert scans.dtype == ms.SCANS_DTYPE and scans.dtype.itemsize == 42  # packed
+    assert list(scans["offset"]) == [0, 16] and list(scans["n"]) == [16, 4]
+    assert ms.read_done(tmp_path / "a.seq.done")["status"] == "aborted"
+    ms.write_fake_result(tmp_path / "b.seq", [], 3)
+    assert not (tmp_path / "b.seq.npy").exists()
+    assert ms.read_done(tmp_path / "b.seq.done")["status"] == "empty"
 
 
 def test_status_finds_lines_and_dates():
@@ -103,6 +138,8 @@ def test_jobs_run_through_in_order(tmp_path):
         signal = np.load(job.npy)
         assert signal.shape == (6 * 16, COILS)
         assert signal.dtype == np.complex64
+        measured = np.load(ms.Share(tmp_path / "share").result(job.day, job.file, ".npy"))
+        assert np.array_equal(signal, measured.conj() if ms.CONJUGATE else measured)
     log = (tmp_path / "logs").glob("scan-log-*.jsonl")
     assert any("job.done" in path.read_text() for path in log)
 
@@ -166,6 +203,42 @@ def test_abort_on_scanner_is_detected(tmp_path):
     assert "3 of 6 ADCs" in job.reason
     assert job.partial and np.load(job.npy).shape == (3 * 16, COILS)
     assert engine.can_retry(job) == (False, True)  # partial data: measure again only
+
+
+def test_scanner_errors_fail_the_job(tmp_path, monkeypatch):
+    engine, _, _ = make(tmp_path, jobs=3)
+    outcomes = iter([("empty", None), ("failed", None), ("complete", 10)])  # the last one: rows missing
+
+    def fake(seq, counts, coils, status="complete", rows=None, rng=None):
+        status, rows = next(outcomes)
+        real(seq, counts if status != "empty" else [], coils, status, rows)
+
+    real = ms.write_fake_result
+    monkeypatch.setattr(ms, "write_fake_result", fake)
+    asyncio.run(run_until(engine, lambda: len(engine.jobs) == 3 and all(s in ms.FINAL for s in states(engine))))
+    jobs = sorted(engine.jobs.values(), key=lambda job: job.created)
+    assert [job.state for job in jobs] == ["failed"] * 3
+    assert "no ADCs" in jobs[0].message
+    assert "status failed" in jobs[1].message
+    assert "10 rows" in jobs[2].message and "96 samples" in jobs[2].message
+
+
+def test_job_without_data_is_failed_once_a_later_one_has_data(tmp_path, monkeypatch):
+    engine, _, _ = make(tmp_path, jobs=2)
+    monkeypatch.setattr(ms, "LOST_AFTER", 0.1)
+    calls = []
+
+    def fake(seq, *args, **kwargs):
+        calls.append(seq)
+        if len(calls) > 1:  # the first one leaves nothing: the sequence gave up
+            real(seq, *args, **kwargs)
+
+    real = ms.write_fake_result
+    monkeypatch.setattr(ms, "write_fake_result", fake)
+    asyncio.run(run_until(engine, lambda: len(engine.jobs) == 2 and all(s in ms.FINAL for s in states(engine))))
+    first, second = sorted(engine.jobs.values(), key=lambda job: job.created)
+    assert second.state == "done"
+    assert first.state == "failed" and "gave up" in first.message and not first.on_scanner
 
 
 def test_retry_measure_and_upload(tmp_path):

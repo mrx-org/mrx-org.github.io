@@ -6,9 +6,12 @@
 ::   1. inbox  : every .seq in V:\inbox (oldest name first) is copied to the
 ::               scanner's dated folder, appended to control.txt in front of the
 ::               trailing "wait", and moved to V:\measurement\<date> as a record.
-::   2. results: every finished .seq.dat on the scanner is moved to the same
-::               dated folder on the share. It shows up there under its real name
-::               only once it is complete.
+::   2. results: every measured job whose <name>.seq.done is there is moved,
+::               as a set, to the same dated folder on the share:
+::               <name>.seq.npy and <name>.seq.scans.npy first, the .seq.done
+::               last. A set on the share is complete once its .seq.done is.
+::               Today's and yesterday's folder are searched (a job measured
+::               just before midnight leaves its set in yesterday's).
 ::   3. status : control.txt, position.txt and a heartbeat are copied to
 ::               V:\status, so the PC with the script knows what the scanner does.
 ::
@@ -62,6 +65,10 @@ set "HOST_ROOT=%PULSEQ%\seq-files\measurement"
 set "HOST_CONTROL=%PULSEQ%\control"
 set "CONTROL=%HOST_CONTROL%\control.txt"
 set "POSITION=%HOST_CONTROL%\position.txt"
+:: Data the sequence could not give to any line (ExportedData.unassigned.*):
+:: reported, never collected
+set "HOST_DATA=%PULSEQ%\data"
+set "UNASSIGNED_SEEN="
 
 :: --- Start: fresh control.txt ------------------------------------------------
 for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "RUN=%%i"
@@ -79,7 +86,11 @@ call :log same settings next time: %COMMAND%
 :loop
 :: The date is taken every round, so a session that runs past midnight
 :: carries on in the new day's folder.
-for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd"') do set "TODAY=%%i"
+set "TODAY="
+set "YESTERDAY="
+for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd; Get-Date (Get-Date).AddDays(-1) -Format yyyyMMdd"') do (
+    if not defined TODAY (set "TODAY=%%i") else set "YESTERDAY=%%i"
+)
 set "HOST_DAY=%HOST_ROOT%\%TODAY%"
 set "NET_DAY=%NET_ROOT%\%TODAY%"
 if not exist "%HOST_DAY%" mkdir "%HOST_DAY%"
@@ -88,9 +99,11 @@ if not exist "%NET_DAY%" mkdir "%NET_DAY%"
 :: 1) Inbox -> scanner, in name order (the script names files by drop time)
 for /f "delims=" %%F in ('dir /b /a-d /on "%INBOX%\*.seq" 2^>nul') do call :schedule "%%F"
 
-:: 2) Results -> share. Only today's folder is searched; other date folders
-::    are left alone.
+:: 2) Results -> share. Only today's and yesterday's folders are searched;
+::    older date folders are left alone.
+call :collect %YESTERDAY%
 call :collect %TODAY%
+call :unassigned
 
 :: 3) Status for the script
 set /a BEAT+=1
@@ -138,38 +151,62 @@ move /Y "%CONTROL%.tmp" "%CONTROL%" >nul
 exit /b
 
 :collect
-:: %1: date folder (yyyyMMdd). Moves finished .dat files from the scanner's
-:: folder of that day to the same folder on the share. The rename fails while
-:: the ICE program still writes the file; then it is taken in a later round.
+:: %1: date folder (yyyyMMdd). Moves every finished set from the scanner's
+:: folder of that day to the same folder on the share. A set is finished once
+:: the sequence has put its .seq.done next to it (it moves that one last).
 set "SRC=%HOST_ROOT%\%~1"
 set "DST=%NET_ROOT%\%~1"
 if not exist "%SRC%" exit /b
-:: Already on the share = measured again, the data is there: delete it on the
-:: scanner instead of copying it again.
-for /r "%SRC%" %%F in (*.dat) do call :dedupe "%%F"
-for /r "%SRC%" %%F in (*.dat) do ren "%%F" "%%~nxF.tmp" 2>nul
-robocopy "%SRC%" "%DST%" *.dat.tmp /S /MOV /IS /FFT /Z /R:2 /W:2 /NJH /NJS /NDL /NFL /NP >nul
-if errorlevel 8 (
-    call :log copying results of %~1 to the share failed, trying again next round
-    exit /b
-)
-:: If the .dat is already there, the .tmp is a duplicate: delete it.
-if exist "%DST%" for /r "%DST%" %%F in (*.dat.tmp) do (
-    if exist "%%~dpnF" (
-        del /F /Q "%%F" 2>nul && call :log %%~nF already on the share, deleted the duplicate .tmp
-    ) else (
-        ren "%%F" "%%~nF" 2>nul && call :log result %%~nF
-    )
-)
+for /r "%SRC%" %%F in (*.seq.done) do call :collect_set "%%F"
 exit /b
 
-:dedupe
-:: %1: .dat on the scanner. If the same file (same path below the date folder)
-:: is already on the share, delete the one on the scanner. Fails while the ICE
-:: program still writes it; then it is deleted in a later round.
-set "F=%~1"
-call set "T=%%F:%SRC%=%DST%%%"
-if exist "%T%" del /F /Q "%F%" 2>nul && call :log %~nx1 already on the share, deleted it on the scanner
+:collect_set
+:: %1: <name>.seq.done on the scanner. Moves <name>.seq.npy and .scans.npy (a
+:: job without ADCs has none), then the .done. Anything that fails is tried
+:: again next round: the .done stays on the scanner until it is on the share.
+set "BASE=%~dpn1"
+set "SET_NAME=%~n1"
+set "SET_DIR=%~dp1"
+call set "T=%%BASE:%SRC%=%DST%%%"
+for %%T in ("%T%") do set "T_DIR=%%~dpT"
+set "STATUS_WORD=?"
+for /f "usebackq tokens=1,2" %%a in ("%~1") do if /i "%%a"=="status" set "STATUS_WORD=%%b"
+:: Already on the share = measured again, the data is there: delete the set
+:: on the scanner instead of copying it again.
+:: (No parenthesized blocks below: a ")" in a name would end them.)
+if exist "%T%.done" goto collect_set_duplicate
+if not exist "%T_DIR%" mkdir "%T_DIR%"
+robocopy "%SET_DIR:~0,-1%" "%T_DIR:~0,-1%" "%SET_NAME%.npy" "%SET_NAME%.scans.npy" /MOV /IS /Z /R:2 /W:2 /NJH /NJS /NDL /NFL /NP >nul
+if errorlevel 8 goto collect_set_failed
+if exist "%BASE%.npy" goto collect_set_wait
+if exist "%BASE%.scans.npy" goto collect_set_wait
+:: The .done last, under a temporary name, so the script never reads half of it
+copy /Y "%~1" "%T%.done.tmp" >nul 2>&1 || goto collect_set_wait
+move /Y "%T%.done.tmp" "%T%.done" >nul || goto collect_set_wait
+del /F /Q "%~1" 2>nul
+call :log result %SET_NAME% (%STATUS_WORD%)
+exit /b
+:collect_set_wait
+call :log %SET_NAME% not completely on the share yet, trying again next round
+exit /b
+:collect_set_failed
+call :log copying %SET_NAME% to the share failed, trying again next round
+exit /b
+:collect_set_duplicate
+del /F /Q "%BASE%.npy" "%BASE%.scans.npy" 2>nul
+del /F /Q "%~1" 2>nul && call :log %SET_NAME% already on the share, deleted it on the scanner
+exit /b
+
+:unassigned
+:: Reports ExportedData.unassigned.* in the interpreter's data folder once:
+:: data the sequence could not give to any line (a measurement repeated after
+:: a timeout, a manual one). It is not collected.
+:: No parentheses around paths here: a ")" in a path would end the block
+if not exist "%HOST_DATA%\ExportedData.unassigned.*" set "UNASSIGNED_SEEN="
+if not exist "%HOST_DATA%\ExportedData.unassigned.*" exit /b
+if defined UNASSIGNED_SEEN exit /b
+set "UNASSIGNED_SEEN=1"
+call :log data that belongs to no job is in %HOST_DATA%: ExportedData.unassigned.*, not collected
 exit /b
 
 :publish
