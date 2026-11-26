@@ -212,6 +212,30 @@ def read_done(path: Path) -> dict | None:
     return done if "status" in done else None
 
 
+# `<name>.seq.error`: the sequence did not measure the job. Written at the
+# prep that read its line, so before any `.done` - which, if it comes at all,
+# says `status empty` (the placeholder that ran instead).
+ERROR_REASONS = {
+    "load_failed": "the interpreter could not load the sequence",
+    "handover_failed": "the sequence could not be handed over to the scanner (copy to external.seq failed)",
+}
+
+
+def read_error(path: Path) -> str | None:
+    """Why the scanner did not measure a job, from its `.error`, worded for
+    the operator. None while there is none."""
+    try:
+        text = Path(path).read_text(errors="replace").strip()
+    except OSError:
+        return None
+    line = text.splitlines()[0].strip() if text else ""
+    key, _, detail = line.partition(":")
+    reason = ERROR_REASONS.get(key.strip())
+    if reason is None:
+        return "the scanner did not measure it: " + (line or "(empty .error file)")
+    return reason + (": " + detail.strip() if detail.strip() else "")
+
+
 def check_done(done: dict, name: str) -> str:
     """The status of a `.done` whose signal can be used: `complete` or
     `aborted`. Raises `ScanError` for everything else, worded for the operator."""
@@ -422,7 +446,14 @@ class SimulatedScanner:
             seq = self.share.measurement / path.parent.name / path.name
             text = seq.read_text()
             duration = self.duration if self.duration is not None else seq_duration(text) or 5.0
-            self.current = {"seq": seq, "counts": adc_sample_counts(text), "end": time.monotonic() + duration}
+            try:
+                counts = adc_sample_counts(text)
+            except ValueError as e:
+                # As the sequence does: a `.error`, then the placeholder (no
+                # ADC) is measured in its place, which ends in `status empty`
+                write_atomic(seq.with_name(seq.name + ".error"), "load_failed: {}\r\n".format(e).encode())
+                counts, duration = [], 0.1
+            self.current = {"seq": seq, "counts": counts, "end": time.monotonic() + duration}
         self._publish()
 
     def _finish(self, abort: bool = False) -> None:
@@ -904,6 +935,10 @@ class Engine:
                     self.set(job, "measuring", "the interpreter read line {}".format(job.line))
                 else:
                     self.log("job.measured_anyway", "cancelled, but measured anyway: its data will be discarded", job=job)
+            error = read_error(self.share.result(job.day, job.file, ".error"))
+            if error is not None:
+                self.not_measured(job, error)
+                continue
             if not job.read:
                 if job.state == "scheduled":
                     job.message = "in control.txt, line {}".format(job.line)
@@ -918,6 +953,18 @@ class Engine:
             elif job.state == "measuring" and self.share.result(job.day, job.file, ".npy").exists():
                 job.message = "measured, the data is being copied"
         self.find_lost()
+
+    def not_measured(self, job: Job, error: str) -> None:
+        """The sequence did not measure `job` and left a `.error`: it fails
+        with that reason, and the `.done` with `status empty` that may follow
+        is not waited for. Its line in control.txt is used up all the same."""
+        job.on_scanner = False
+        job.read = True
+        job.measured = time.time()  # what came before it has had its turn
+        if job.discard:
+            self.log("job.discarded", "not measured (the job was cancelled): " + error, job=job)
+        elif job.state not in FINAL:
+            self.set(job, "failed", error, level="error")
 
     def find_lost(self) -> None:
         """Jobs whose data never comes: the interpreter measures in name order
