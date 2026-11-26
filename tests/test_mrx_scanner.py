@@ -223,6 +223,33 @@ def test_scanner_errors_fail_the_job(tmp_path, monkeypatch):
     assert "10 rows" in jobs[2].message and "96 samples" in jobs[2].message
 
 
+def test_read_error(tmp_path):
+    path = tmp_path / "a.seq.error"
+    assert ms.read_error(path) is None
+    path.write_text("load_failed: unknown section [FOO]\r\n")
+    assert ms.read_error(path) == "the interpreter could not load the sequence: unknown section [FOO]"
+    path.write_text("handover_failed: access denied\n")
+    assert ms.read_error(path).startswith("the sequence could not be handed over")
+    path.write_text("something else\n")
+    assert ms.read_error(path) == "the scanner did not measure it: something else"
+
+
+def test_sequence_that_does_not_load_fails_with_the_error(tmp_path):
+    engine, gateway, _ = make(tmp_path, jobs=2)
+    good = gateway.download
+    seqs = iter([b"[BLOCKS]\n1 100 0 0 0 0 7 0\n", None])  # ADC 7 is not defined
+
+    async def download(job):
+        return next(seqs) or await good(job)
+
+    gateway.download = download
+    asyncio.run(run_until(engine, lambda: len(engine.jobs) == 2 and all(s in ms.FINAL for s in states(engine))))
+    first, second = sorted(engine.jobs.values(), key=lambda job: job.created)
+    assert first.state == "failed" and first.message.startswith("the interpreter could not load the sequence")
+    assert "no ADCs" not in first.message  # the empty .done after it is not read
+    assert second.state == "done"
+
+
 def test_job_without_data_is_failed_once_a_later_one_has_data(tmp_path, monkeypatch):
     engine, _, _ = make(tmp_path, jobs=2)
     monkeypatch.setattr(ms, "LOST_AFTER", 0.1)

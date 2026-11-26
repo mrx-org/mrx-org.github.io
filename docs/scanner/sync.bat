@@ -12,6 +12,10 @@
 ::               last. A set on the share is complete once its .seq.done is.
 ::               Today's and yesterday's folder are searched (a job measured
 ::               just before midnight leaves its set in yesterday's).
+::               A <name>.seq.error (the sequence could not measure the job) is
+::               moved on its own, at once: a .done may follow much later or
+::               never. A set or .error whose name is already on the share is
+::               moved there as <name>.seq.dup-<n>.* and reported.
 ::   3. status : control.txt, position.txt and a heartbeat are copied to
 ::               V:\status, so the PC with the script knows what the scanner does.
 ::
@@ -157,13 +161,17 @@ exit /b
 set "SRC=%HOST_ROOT%\%~1"
 set "DST=%NET_ROOT%\%~1"
 if not exist "%SRC%" exit /b
-for /r "%SRC%" %%F in (*.seq.done) do call :collect_set "%%F"
+for /r "%SRC%" %%F in (*.seq.done *.seq.dup-*.done) do call :collect_set "%%F"
+:: (*.seq.error.part is still being written by the sequence: not matched here)
+for /r "%SRC%" %%F in (*.seq.error) do call :collect_error "%%F"
 exit /b
 
 :collect_set
 :: %1: <name>.seq.done on the scanner. Moves <name>.seq.npy and .scans.npy (a
 :: job without ADCs has none), then the .done. Anything that fails is tried
 :: again next round: the .done stays on the scanner until it is on the share.
+:: Gone already (moved earlier in this round, for /r may list it again)
+if not exist "%~1" exit /b
 set "BASE=%~dpn1"
 set "SET_NAME=%~n1"
 set "SET_DIR=%~dp1"
@@ -171,8 +179,8 @@ call set "T=%%BASE:%SRC%=%DST%%%"
 for %%T in ("%T%") do set "T_DIR=%%~dpT"
 set "STATUS_WORD=?"
 for /f "usebackq tokens=1,2" %%a in ("%~1") do if /i "%%a"=="status" set "STATUS_WORD=%%b"
-:: Already on the share = measured again, the data is there: delete the set
-:: on the scanner instead of copying it again.
+:: Already on the share: the same file was scheduled twice. Kept, as a
+:: duplicate (see collect_set_duplicate).
 :: (No parenthesized blocks below: a ")" in a name would end them.)
 if exist "%T%.done" goto collect_set_duplicate
 if not exist "%T_DIR%" mkdir "%T_DIR%"
@@ -193,8 +201,49 @@ exit /b
 call :log copying %SET_NAME% to the share failed, trying again next round
 exit /b
 :collect_set_duplicate
-del /F /Q "%BASE%.npy" "%BASE%.scans.npy" 2>nul
-del /F /Q "%~1" 2>nul && call :log %SET_NAME% already on the share, deleted it on the scanner
+:: Renamed on the scanner to <name>.seq.dup-<n>.*, with the first <n> free on
+:: both sides, the .done last, and then collected under that name. If this
+:: stops halfway, the renamed set is taken up again next round.
+set /a N=0
+:collect_set_dup_next
+set /a N+=1
+if exist "%T%.dup-%N%.done" goto collect_set_dup_next
+if exist "%BASE%.dup-%N%.done" goto collect_set_dup_next
+ren "%BASE%.npy" "%SET_NAME%.dup-%N%.npy" 2>nul
+ren "%BASE%.scans.npy" "%SET_NAME%.dup-%N%.scans.npy" 2>nul
+ren "%~1" "%SET_NAME%.dup-%N%.done" || goto collect_set_wait
+call :log %SET_NAME% is already on the share: scheduled twice, this one goes there as %SET_NAME%.dup-%N%
+call :collect_set "%SET_DIR%%SET_NAME%.dup-%N%.done"
+exit /b
+
+:collect_error
+:: %1: <name>.seq.error on the scanner: the sequence did not measure the job
+:: (load_failed, handover_failed). Copied as .tmp, renamed, then deleted on
+:: the scanner. One already on the share goes there as <name>.seq.dup-<n>.error.
+:: (No parenthesized blocks: a ")" in a name would end them.)
+:: Gone already (moved earlier in this round, for /r may list it again)
+if not exist "%~1" exit /b
+set "E=%~1"
+set "E_NAME=%~n1"
+call set "T=%%E:%SRC%=%DST%%%"
+for %%T in ("%T%") do set "T_DIR=%%~dpT"
+set "T_BASE=%T:~0,-6%"
+if not exist "%T%" goto collect_error_copy
+set /a N=0
+:collect_error_dup_next
+set /a N+=1
+if exist "%T_BASE%.dup-%N%.error" goto collect_error_dup_next
+set "T=%T_BASE%.dup-%N%.error"
+call :log %E_NAME%.error is already on the share: scheduled twice, this one goes there as %E_NAME%.dup-%N%.error
+:collect_error_copy
+if not exist "%T_DIR%" mkdir "%T_DIR%"
+copy /Y "%E%" "%T%.tmp" >nul 2>&1 || goto collect_error_failed
+move /Y "%T%.tmp" "%T%" >nul || goto collect_error_failed
+del /F /Q "%E%" 2>nul
+call :log %E_NAME% was not measured, the reason is in its .error on the share
+exit /b
+:collect_error_failed
+call :log copying %E_NAME%.error to the share failed, trying again next round
 exit /b
 
 :unassigned
