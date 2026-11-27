@@ -1293,6 +1293,11 @@ class ScannerApp(App):
         self.set_interval(0.5, self.tick)
         self.refresh_views()
 
+    def on_unmount(self) -> None:
+        # The log goes on after the app (`script.stop`): not into widgets that are gone
+        if self.on_log in self.engine.log.listeners:
+            self.engine.log.listeners.remove(self.on_log)
+
     async def tick(self) -> None:
         await self.engine.tick()
         self.refresh_views()

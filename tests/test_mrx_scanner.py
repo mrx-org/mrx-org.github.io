@@ -357,5 +357,6 @@ def test_tui_shows_jobs_and_cancels(tmp_path):
             await pilot.press("f")  # hide finished
             await pilot.pause(0.6)
             assert table.row_count == 2
+        engine.log("script.stop", "stopped")  # what main() logs after the app has closed
 
     asyncio.run(go())
