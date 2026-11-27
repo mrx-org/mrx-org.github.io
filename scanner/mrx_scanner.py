@@ -33,11 +33,13 @@ import hashlib
 import json
 import os
 import random
+import re
 import secrets
 import shutil
 import subprocess
 import sys
 import time
+import unicodedata
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 from pathlib import Path, PureWindowsPath
@@ -309,6 +311,23 @@ def write_atomic(path: Path, data: bytes) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_bytes(data)
     os.replace(tmp, path)
+
+
+NAME_IN_FILE = 40  # characters of a job's name in its file name on the scanner
+
+
+def name_in_file(name: str, job_id: str) -> str:
+    """A job's name as it can go into its file name on the scanner, "" for
+    none. sync.bat hands file names to cmd, which breaks on `% ! & ^` and
+    spaces, Windows forbids `\\/:*?"<>|`, and the results add `.scans.npy` to
+    a long path: so ASCII letters, digits, `.`, `_` and `-`, and short."""
+    if name.lower().endswith(".seq"):
+        name = name[:-4]
+    if name == job_id:  # no name given: the job id stands in for it
+        return ""
+    name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._-")
+    return name[:NAME_IN_FILE].rstrip("._-")
 
 
 def size(n_bytes: float) -> str:
@@ -890,9 +909,11 @@ class Engine:
         )
         for job in ready[: max(0, self.lookahead - waiting)]:
             self._drops += 1
-            # The name order is the drop order: sync.bat schedules by name
+            # The name order is the drop order: sync.bat schedules by name, so
+            # the job's own name only comes after the time and the counter
             stamp = datetime.now().strftime("%y%m%d-%H%M%S")
-            job.file = "mrx_{}-{:02d}_{}.seq".format(stamp, self._drops % 100, job.id)
+            name = name_in_file(job.name, job.id)
+            job.file = "mrx_{}-{:02d}_{}{}.seq".format(stamp, self._drops % 100, name + "_" if name else "", job.id)
             self.share.drop(job.file, self.seq_path(job).read_bytes())
             job.on_scanner, job.read, job.line, job.day = True, False, 0, ""
             self.set(job, "scheduled", "dropped into the inbox as " + job.file)
