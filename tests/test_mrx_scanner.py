@@ -67,6 +67,15 @@ def test_demo_seq_is_read_back():
     assert ms.seq_duration(text) == 7.5
 
 
+def test_name_in_file():
+    assert ms.name_in_file("gre_2d.seq", "abc") == "gre_2d"
+    assert ms.name_in_file("T1 map (Müller) 50%!.SEQ", "abc") == "T1_map_Muller_50"
+    assert ms.name_in_file(r"..\a/b:c*?.seq", "abc") == "a_b_c"
+    assert ms.name_in_file("x" * 100, "abc") == "x" * ms.NAME_IN_FILE
+    assert ms.name_in_file("abc", "abc") == ""  # the job id standing in for a name
+    assert ms.name_in_file("%!&^", "abc") == ""
+
+
 def test_whole_adcs():
     counts = [10, 20, 30]
     assert ms.whole_adcs(0, counts) == 0
@@ -134,6 +143,9 @@ def test_jobs_run_through_in_order(tmp_path):
     asyncio.run(go())
     jobs = sorted(engine.jobs.values(), key=lambda job: job.created)
     assert [job.line for job in jobs] == [1, 2, 3]
+    # The name order is the drop order; the job's name is in it, the id last
+    assert [job.file for job in jobs] == sorted(job.file for job in jobs)
+    assert all(job.file.endswith("_{}_{}.seq".format(job.name, job.id)) for job in jobs)
     for job in jobs:
         signal = np.load(job.npy)
         assert signal.shape == (6 * 16, COILS)
